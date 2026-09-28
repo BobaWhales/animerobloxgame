@@ -202,6 +202,49 @@ local PRESETS = {
 		e.Brightness = 2
 		e.LockedToPart = false
 	end,
+	-- slow, huge, barely-there ground fog (lit by the scene)
+	Fog = function(e: ParticleEmitter, c: Color3)
+		e.Texture = TEX.Smoke
+		e.Color = CS(c)
+		e.Size = NS(0, 9, 0.5, 14, 1, 16)
+		e.Transparency = NS(0, 1, 0.3, 0.88, 0.7, 0.9, 1, 1)
+		e.Lifetime = NumberRange.new(9, 14)
+		e.Speed = NumberRange.new(0.3, 0.9)
+		e.SpreadAngle = Vector2.new(180, 10)
+		e.Rotation = NumberRange.new(0, 360)
+		e.RotSpeed = NumberRange.new(-6, 6)
+		e.Acceleration = Vector3.new(0.4, 0, 0.2)
+		e.LightEmission = 0
+		e.LightInfluence = 1
+		e.ZOffset = -1
+	end,
+	-- tiny motes drifting through light shafts
+	Dust = function(e: ParticleEmitter, c: Color3)
+		e.Texture = TEX.Sparkle
+		e.Color = CS(c)
+		e.Size = NS(0, 0, 0.2, 0.12, 0.8, 0.12, 1, 0)
+		e.Transparency = NS(0, 1, 0.3, 0.35, 0.7, 0.35, 1, 1)
+		e.Lifetime = NumberRange.new(5, 9)
+		e.Speed = NumberRange.new(0.2, 0.6)
+		e.SpreadAngle = Vector2.new(180, 180)
+		e.Acceleration = Vector3.new(0.15, 0.05, 0.1)
+		e.LightEmission = 0.4
+		e.LightInfluence = 0.6
+	end,
+	-- lazy floating embers
+	FloatEmbers = function(e: ParticleEmitter, c: Color3)
+		e.Texture = TEX.FireSparks
+		e.Color = CS(WHITE, c)
+		e.Size = NS(0, 0, 0.15, 0.22, 0.85, 0.15, 1, 0)
+		e.Lifetime = NumberRange.new(4, 7)
+		e.Speed = NumberRange.new(0.5, 1.5)
+		e.EmissionDirection = Enum.NormalId.Top
+		e.SpreadAngle = Vector2.new(60, 60)
+		e.Acceleration = Vector3.new(0.6, 0.9, 0.3)
+		e.RotSpeed = NumberRange.new(-60, 60)
+		e.LightEmission = 1
+		e.Brightness = 2.5
+	end,
 	Vortex = function(e: ParticleEmitter, c: Color3)
 		e.Texture = TEX.Vortex
 		e.Color = CS(c)
@@ -551,6 +594,12 @@ function VFX.EnemyDeath(model: Model, color: Color3, big: boolean?)
 		end
 	end
 	local scale = big and 2.5 or 1
+	-- the glowing core bursts first
+	local core = model:FindFirstChild("Core", true)
+	if core and core:IsA("BasePart") then
+		VFX.Flash(core.Position, core.Color, 3 * scale, 0.2)
+		VFX.Emit(core.Position, "Stars", big and 20 or 8, core.Color)
+	end
 	VFX.Emit(pos, "Shards", big and 40 or 16, color)
 	VFX.Emit(pos, "Sparks", big and 40 or 18, color)
 	VFX.Emit(pos, "Smoke", big and 14 or 5, Color3.fromRGB(220, 220, 230))
@@ -595,8 +644,16 @@ end
 ---------------------------------------------------------------------
 local screenGui: ScreenGui? = nil
 local shakeTrauma = 0
+local rumble = 0
 local fovPunch = 0
 local baseFov = 70
+local fovTargets: { [string]: number } = {}
+local fovOffset = 0
+local baseCF: CFrame? = nil
+local appliedCF: CFrame? = nil
+
+-- Optional camera modifier (Client/CameraDirector): (cf, dt) -> cf.
+VFX.CameraModifier = nil :: ((CFrame, number) -> CFrame)?
 
 function VFX.Init()
 	local player = Players.LocalPlayer
@@ -611,10 +668,27 @@ function VFX.Init()
 	sg.Parent = player:WaitForChild("PlayerGui")
 	screenGui = sg
 
+	-- Our offsets are removed again just before Roblox's camera updates, so
+	-- shake / framing never accumulate into the player's own camera angle.
+	RunService:BindToRenderStep("VFXCameraRestore", Enum.RenderPriority.Camera.Value - 1, function()
+		local cam = workspace.CurrentCamera
+		if cam and baseCF and appliedCF and cam.CFrame == appliedCF then
+			cam.CFrame = baseCF
+		end
+		baseCF, appliedCF = nil, nil
+	end)
 	RunService:BindToRenderStep("VFXCamera", Enum.RenderPriority.Camera.Value + 1, function(dt)
 		local cam = workspace.CurrentCamera
 		if not cam then
 			return
+		end
+		local base = cam.CFrame
+		local cf = base
+		if VFX.CameraModifier then
+			local ok, result = pcall(VFX.CameraModifier, cf, dt)
+			if ok and typeof(result) == "CFrame" then
+				cf = result
+			end
 		end
 		if shakeTrauma > 0 then
 			local s = shakeTrauma * shakeTrauma
@@ -622,11 +696,27 @@ function VFX.Init()
 			local rx = (math.noise(t, 0.3) * 2) * s * 0.035
 			local ry = (math.noise(0.7, t) * 2) * s * 0.035
 			local rz = (math.noise(t, t * 0.5) * 2) * s * 0.02
-			cam.CFrame = cam.CFrame * CFrame.Angles(rx, ry, rz)
+			cf = cf * CFrame.Angles(rx, ry, rz)
 			shakeTrauma = math.max(0, shakeTrauma - dt * 1.8)
 		end
+		if rumble > 0 then
+			-- heavy impacts: slower, weightier sway + a little vertical bob
+			local s = rumble * rumble
+			local t = os.clock() * 13
+			cf = cf * CFrame.new(0, math.noise(t, 4.1) * s * 0.35, 0) * CFrame.Angles(math.noise(t, 1.3) * s * 0.05, math.noise(2.2, t) * s * 0.04, math.noise(t, 7.7) * s * 0.03)
+			rumble = math.max(0, rumble - dt * 1.3)
+		end
+		if cf ~= base then
+			cam.CFrame = cf
+			baseCF, appliedCF = base, cf
+		end
 		fovPunch = fovPunch + (0 - fovPunch) * math.min(1, dt * 8)
-		cam.FieldOfView = baseFov + fovPunch
+		local target = 0
+		for _, v in pairs(fovTargets) do
+			target += v
+		end
+		fovOffset = fovOffset + (target - fovOffset) * math.min(1, dt * 4)
+		cam.FieldOfView = baseFov + fovOffset + fovPunch
 	end)
 end
 
@@ -634,8 +724,18 @@ function VFX.SetBaseFov(f: number)
 	baseFov = f
 end
 
+-- Soft, smoothed FOV offsets by key (sprint, camera framing...).
+function VFX.SetFovOffset(key: string, amount: number)
+	fovTargets[key] = amount
+end
+
 function VFX.Shake(amount: number)
 	shakeTrauma = math.min(1, shakeTrauma + amount)
+end
+
+-- Low-frequency rumble for heavy impacts (slams, big kills, ultimates).
+function VFX.Rumble(amount: number)
+	rumble = math.min(1, rumble + amount)
 end
 
 function VFX.FOVPunch(amount: number)
@@ -724,7 +824,8 @@ function VFX.ImpactFrame(color: Color3?, strength)
 		VFX.ScreenFlash(color or WHITE, 0.1, 0.35)
 	end)
 	VFX.SpeedLines(0.35 * strength, color)
-	VFX.Shake(0.55 * strength)
+	VFX.Shake(0.4 * strength)
+	VFX.Rumble(0.35 * strength)
 	VFX.FOVPunch(-8 * strength)
 end
 

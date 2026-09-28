@@ -51,24 +51,26 @@ local function makeGem(ore)
 		b.Transparency = VFX.NS(0, 0.2, 1, 1)
 		b.Parent = beamHolder
 		if order >= 5 then
+			-- small, crisp label for rare drops (soft shadow, no heavy outline)
 			local bb = Instance.new("BillboardGui")
-			bb.Size = UDim2.fromOffset(180, 30)
-			bb.StudsOffset = Vector3.new(0, 2.4, 0)
+			bb.Size = UDim2.fromOffset(110, 17)
+			bb.StudsOffset = Vector3.new(0, 2.2, 0)
 			bb.AlwaysOnTop = true
-			bb.MaxDistance = 80
+			bb.MaxDistance = 60
 			bb.LightInfluence = 0
 			bb.Adornee = gem
 			bb.Parent = gem
 			local t = Instance.new("TextLabel")
 			t.BackgroundTransparency = 1
 			t.Size = UDim2.fromScale(1, 1)
-			t.Font = Enum.Font.LuckiestGuy
+			t.Font = Enum.Font.BuilderSansBold
 			t.TextScaled = true
 			t.Text = ore.Name
-			t.TextColor3 = ore.Color
+			t.TextColor3 = ore.Color:Lerp(Color3.new(1, 1, 1), 0.2)
 			t.Parent = bb
 			local st = Instance.new("UIStroke")
-			st.Thickness = 2
+			st.Thickness = 1
+			st.Transparency = 0.45
 			st.Parent = t
 		end
 	end

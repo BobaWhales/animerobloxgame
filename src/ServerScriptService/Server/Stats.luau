@@ -387,6 +387,7 @@ function Stats.Snapshot(player: Player)
 		Streak = data.Streak,
 		TotalPlaytime = data.TotalPlaytime,
 		Cosmetics = data.Cosmetics,
+		Explored = data.Explored,
 		PlaytimeClaimed = s.PlaytimeClaimed,
 		Derived = {
 			PowerMult = Stats.PowerTierMult(player),

@@ -228,6 +228,7 @@ local function tryAttack()
 	local dir, _ = aim()
 	faceTowards(dir)
 	remote:FireServer("Attack", { Aim = dir })
+	feedback("Action")
 
 	local color = def.Glow or rarity.Color
 	if class.Kind == "Ranged" then
@@ -292,6 +293,7 @@ local function tryDash()
 	Abilities.CooldownEnds.Q = t + B.DashCooldown * B.CooldownMult
 	Abilities.CooldownLength.Q = B.DashCooldown * B.CooldownMult
 	remote:FireServer("Dash", { Aim = flat(dir) })
+	feedback("Action")
 	doDash(dir, B.DashDistanceSpeed, B.DashDuration)
 	SFX.Play("Dash")
 	VFX.FOVPunch(6)
@@ -334,6 +336,7 @@ local function castInstant(slot: string)
 	local dir, target = aim()
 	faceTowards(dir)
 	remote:FireServer(slot == "E" and "Skill" or "Ultimate", { Aim = dir, Target = target })
+	feedback("Action")
 	skillMovement(skill, dir)
 	-- optimistic cooldown (server sends the exact value back)
 	local cd = skill.Cooldown * B.CooldownMult
@@ -351,6 +354,7 @@ local function beginCharge(slot: string)
 	local orb = hand and VFX.ChargeOrb(hand, Vector3.new(0, -0.9, 0), skill.Color, skill.Type == "ChargeLunge" and 2.6 or 1.8, skill.Charge)
 	charging = { Slot = slot, Orb = orb, Start = os.clock() }
 	remote:FireServer("ChargeBegin", { Slot = slot })
+	feedback("Action")
 	play("Charge")
 	SFX.Play("ChargeUp")
 end
@@ -434,6 +438,7 @@ end
 local function onPotion(_, state)
 	if state == Enum.UserInputState.Begin then
 		remote:FireServer("Potion")
+		feedback("Action")
 	end
 	return Enum.ContextActionResult.Sink
 end

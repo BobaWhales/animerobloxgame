@@ -1,8 +1,9 @@
 --!nonstrict
 -- Client (LocalScript) -> StarterPlayer/StarterPlayerScripts/Client
--- Put the UI, Hud, WeaponUI, Abilities, PromptUI and Drops ModuleScripts
--- INSIDE this LocalScript. Handles server FX events, world VFX/SFX, gates,
--- pads and zones.
+-- Put the UI, Hud, WeaponUI, Abilities, PromptUI, Drops, WorldText,
+-- WorldMap, EnemyFX, CameraDirector and Movement ModuleScripts INSIDE this
+-- LocalScript. Handles server FX events, world VFX/SFX, gates, pads and
+-- zones.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -23,6 +24,11 @@ local Abilities = require(script:WaitForChild("Abilities"))
 local Hud = require(script:WaitForChild("Hud"))
 local WeaponUI = require(script:WaitForChild("WeaponUI"))
 local PromptUI = require(script:WaitForChild("PromptUI"))
+local WorldText = require(script:WaitForChild("WorldText"))
+local WorldMap = require(script:WaitForChild("WorldMap"))
+local EnemyFX = require(script:WaitForChild("EnemyFX"))
+local CameraDirector = require(script:WaitForChild("CameraDirector"))
+local Movement = require(script:WaitForChild("Movement"))
 
 local player = Players.LocalPlayer
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -44,10 +50,21 @@ Abilities.Init(AbilityRemote, request)
 Hud.Init(UI, Abilities)
 PromptUI.Init(InteractRemote)
 Drops.Init(request)
+WorldText.Init()
+WorldMap.Init(UI, request)
+UI.ToggleMap = WorldMap.Toggle
+EnemyFX.Init(UI)
+CameraDirector.Init()
+CameraDirector.Blocked = function()
+	return WorldMap.IsOpen or UI.IsPanelOpen()
+end
+Movement.Init()
 
 Abilities.OnFeedback = function(kind)
 	if kind == "NoStamina" then
 		Hud.FlashStamina()
+	elseif kind == "Action" then
+		Hud.Combat()
 	end
 end
 
@@ -101,9 +118,8 @@ local function refreshGate(gate: BasePart)
 	gate.CanCollide = not open
 	gate.Transparency = open and 0.85 or 0.1
 	local label = gate:FindFirstChild("GateLabel")
-	local title = label and label:FindFirstChild("Title")
-	if title then
-		(title :: TextLabel).Text = open and ("STAGE " .. stageIndex .. " - OPEN") or ("LOCKED - " .. Format.Abbrev(stage.PowerReq) .. " Power")
+	if label then
+		WorldText.SetText(label, "Title", open and ("STAGE " .. stageIndex .. " - OPEN") or ("LOCKED - " .. Format.Abbrev(stage.PowerReq) .. " Power"))
 	end
 	if open and stage.PowerReq > 0 and gate:GetAttribute("Seen") then
 		UI.Notify("Stage " .. stageIndex .. " unlocked!", zone.Accent)
@@ -128,6 +144,7 @@ SyncRemote.OnClientEvent:Connect(function(snapshot)
 	local old = data
 	data = snapshot
 	UI.Update(snapshot)
+	WorldMap.Update(snapshot)
 	refreshGates()
 	if old and snapshot.Blade > old.Blade then
 		UI.Bump("Blade")
@@ -170,16 +187,34 @@ FX.Attack = function(p)
 	end
 end
 
+-- impact sound family per weapon class
+local HIT_SOUND = { Katana = "HitBlade", Scythe = "HitBlade", Greatsword = "HitBlunt", Glove = "HitBlunt", Pistols = "HitEnergy", FingerGun = "HitEnergy" }
+local lastExposedPop = 0
+
 FX.Hit = function(p)
 	local color = p.Color or Color3.new(1, 1, 1)
 	VFX.HitSpark(p.Pos, color, p.Crit)
 	if p.Model then
 		VFX.EnemyHitFlash(p.Model)
 	end
+	EnemyFX.OnHit(p.Model, p.By == player)
 	if p.By == player then
+		Hud.Combat()
 		VFX.DamageNumber(p.Pos + Vector3.new(0, 1.5, 0), p.Amount, p.Crit)
-		SFX.Play(p.Crit and "Crit" or "Hit", { At = p.Pos })
-		VFX.Shake(p.Crit and 0.16 or 0.05)
+		local cls = player:GetAttribute("WeaponClass")
+		SFX.Play(p.Crit and "Crit" or (HIT_SOUND[cls] or "Hit"), { At = p.Pos })
+		if p.Crit then
+			VFX.Shake(0.12)
+			VFX.Rumble(0.12)
+		else
+			VFX.Shake(0.04)
+		end
+		-- punish window feedback (enemy was recovering from its attack)
+		if p.Exposed and os.clock() - lastExposedPop > 0.8 then
+			lastExposedPop = os.clock()
+			VFX.TextPop(p.Pos + Vector3.new(0, 3, 0), "EXPOSED", Color3.fromRGB(255, 225, 120), 0.8)
+			SFX.Play("Exposed", { At = p.Pos })
+		end
 	end
 end
 
@@ -193,6 +228,7 @@ FX.Kill = function(p)
 		SFX.Play("BossKill")
 		local root = myRoot()
 		if root and (root.Position - p.Pos).Magnitude < 150 then
+			VFX.Rumble(0.6)
 			VFX.ImpactFrame(p.Color, 1.4)
 			VFX.TitleCard("BOSS DEFEATED!", nil, Color3.fromRGB(255, 215, 80), 1.6)
 		end
@@ -371,7 +407,8 @@ FX.Slam = function(p)
 	SFX.Play("BossSlam", { At = p.Pos })
 	local root = myRoot()
 	if root and (root.Position - p.Pos).Magnitude < 60 then
-		VFX.Shake(0.45)
+		VFX.Shake(0.25)
+		VFX.Rumble(0.55)
 	end
 end
 
@@ -383,12 +420,17 @@ end
 
 FX.Hurt = function(p)
 	SFX.Play("Hurt")
-	VFX.ScreenFlash(Color3.fromRGB(255, 30, 40), 0.55, 0.35)
-	VFX.Shake(0.22)
+	Hud.Hurt()
+	VFX.ScreenFlash(Color3.fromRGB(255, 30, 40), 0.7, 0.3)
+	VFX.Shake(0.18)
+	if p.Stun then
+		VFX.Rumble(0.25)
+	end
 end
 
 FX.Dodge = function()
 	local root = myRoot()
+	Hud.Combat()
 	if root then
 		VFX.TextPop(root.Position + Vector3.new(0, 3, 0), "DODGE!", Color3.fromRGB(140, 160, 255), 1)
 		SFX.Play("UIHover", { Pitch = 0.8, Volume = 2 })
@@ -603,7 +645,8 @@ FX.Impact = function(p)
 		SFX.Play("RasenganHit", { At = p.Pos })
 		local root = myRoot()
 		if root and (root.Position - p.Pos).Magnitude < 60 then
-			VFX.Shake(0.45)
+			VFX.Shake(0.25)
+			VFX.Rumble(0.45)
 		end
 	elseif p.Kind == "Rain" then
 		VFX.Pillar(p.Pos - Vector3.new(0, 1, 0), color, 40, 2.5, 0.5)
@@ -632,6 +675,7 @@ end
 
 FX.Potion = function()
 	SFX.Play("Potion")
+	Hud.Ping("Vitals", 3)
 	local char = player.Character
 	if char then
 		VFX.LevelBurst(char, Color3.fromRGB(120, 255, 140))
@@ -694,6 +738,7 @@ end
 
 FX.PlaytimeReward = function(p)
 	SFX.Play("PlaytimeReward")
+	Hud.Ping("Playtime", 6)
 	VFX.TitleCard("PLAY-TIME REWARD!", p.Minutes .. " min: " .. p.Name, Color3.fromRGB(255, 215, 80), 2)
 	UI.FlyToHud("Coins", nil, Color3.fromRGB(255, 210, 60), 6)
 end
@@ -767,12 +812,40 @@ local function pointInPart(part: BasePart, pos: Vector3): boolean
 	return math.abs(rel.X) <= half.X and math.abs(rel.Y) <= half.Y and math.abs(rel.Z) <= half.Z
 end
 
+-- gently flickering flames / lanterns (lights tagged "Flicker")
+local flickers = {}
+local function addFlicker(l: Instance)
+	if l:IsA("Light") then
+		flickers[l] = { Base = l.Brightness, Seed = math.random() * 100 }
+	end
+end
+for _, l in ipairs(CollectionService:GetTagged("Flicker")) do
+	addFlicker(l)
+end
+CollectionService:GetInstanceAddedSignal("Flicker"):Connect(addFlicker)
+
 local accum = 0
 RunService.RenderStepped:Connect(function(dt)
-	UI.Tick()
-	Hud.Tick()
+	UI.Tick(dt)
+	Hud.Tick(dt)
+	WorldText.Step(dt)
+	WorldMap.Step(dt)
+	EnemyFX.Step(dt)
+	Movement.Step(dt)
 	local root = myRoot()
 	Drops.Step(dt, root)
+
+	local now = os.clock()
+	for l, f in pairs(flickers) do
+		if l.Parent then
+			local lp = l.Parent :: any
+			if root and lp:IsA("BasePart") and (lp.Position - root.Position).Magnitude < 120 then
+				l.Brightness = f.Base * (0.86 + 0.14 * math.noise(now * 3.1, f.Seed) + 0.08 * math.sin(now * 11 + f.Seed))
+			end
+		else
+			flickers[l] = nil
+		end
+	end
 
 	local t = os.clock()
 	for inst, s in pairs(spinners) do

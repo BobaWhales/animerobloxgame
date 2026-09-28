@@ -59,48 +59,108 @@ local function disc(parent, pos: Vector3, diameter: number, thickness: number, c
 	})
 end
 
-local function billboard(adornee: Instance, title: string, sub: string?, color: Color3, height: number, scale)
-	scale = scale or 1
+-- Minimal world label. Starts at 0% opacity (the "Fade" CanvasGroup) and is
+-- faded in by Client/WorldText only when a player walks close. No boxes:
+-- the text sits on a soft glow streak with a light drop shadow.
+-- radius (optional) widens the proximity zone for very large landmarks.
+local function textLine(parent: Instance, name: string, text: string, color: Color3, font: Enum.Font, pos: UDim2, size: UDim2, z: number)
+	local shadow = Instance.new("TextLabel")
+	shadow.Name = name .. "Shadow"
+	shadow.BackgroundTransparency = 1
+	shadow.Position = pos + UDim2.fromOffset(0, 2)
+	shadow.Size = size
+	shadow.Font = font
+	shadow.TextScaled = true
+	shadow.Text = text
+	shadow.TextColor3 = Color3.fromRGB(8, 6, 16)
+	shadow.TextTransparency = 0.45
+	shadow.ZIndex = z
+	shadow.Parent = parent
+	local t = Instance.new("TextLabel")
+	t.Name = name
+	t.BackgroundTransparency = 1
+	t.Position = pos
+	t.Size = size
+	t.Font = font
+	t.TextScaled = true
+	t.Text = text
+	t.TextColor3 = color
+	t.ZIndex = z + 1
+	t.Parent = parent
+	-- keep the shadow in sync if the text is changed later (gate labels)
+	t:GetPropertyChangedSignal("Text"):Connect(function()
+		shadow.Text = t.Text
+	end)
+	local glow = Instance.new("UIStroke")
+	glow.Thickness = 1.2
+	glow.Color = color
+	glow.Transparency = 0.6
+	glow.Parent = t
+	return t
+end
+
+local function billboard(adornee: Instance, title: string, sub: string?, color: Color3, height: number, scale, radius: number?)
+	scale = (scale or 1) * Config.WorldText.FontScale
 	local bb = Instance.new("BillboardGui")
 	bb.Name = "Label"
-	bb.Size = UDim2.fromOffset(320 * scale, (sub and 110 or 70) * scale)
+	bb.Size = UDim2.fromOffset(320 * scale, (sub and 100 or 62) * scale)
 	bb.StudsOffset = Vector3.new(0, height, 0)
-	bb.MaxDistance = 220
+	bb.MaxDistance = 150
 	bb.LightInfluence = 0
 	bb.AlwaysOnTop = false
+	bb.ClipsDescendants = false
+	if radius then
+		bb:SetAttribute("Radius", radius)
+	end
+	CollectionService:AddTag(bb, "WorldLabel")
 	bb.Parent = adornee
-	local t = Instance.new("TextLabel")
-	t.Name = "Title"
-	t.BackgroundTransparency = 1
-	t.Size = UDim2.fromScale(1, sub and 0.62 or 1)
-	t.Font = Enum.Font.LuckiestGuy
-	t.TextScaled = true
-	t.Text = title
-	t.TextColor3 = color
-	t.Parent = bb
-	local st = Instance.new("UIStroke")
-	st.Thickness = 3
-	st.Color = Color3.fromRGB(15, 10, 25)
-	st.Parent = t
-	local g = Instance.new("UIGradient")
-	g.Color = ColorSequence.new(WHITE, color)
-	g.Rotation = 90
-	g.Parent = t
+
+	local fade = Instance.new("CanvasGroup")
+	fade.Name = "Fade"
+	fade.BackgroundTransparency = 1
+	fade.Size = UDim2.fromScale(1, 1)
+	fade.GroupTransparency = 1 -- 0% opacity until the player is near
+	fade.Parent = bb
+
+	-- soft glow streak behind the title (no hard edges, no box)
+	local glow = Instance.new("Frame")
+	glow.Name = "Glow"
+	glow.AnchorPoint = Vector2.new(0.5, 0.5)
+	glow.Position = UDim2.fromScale(0.5, sub and 0.34 or 0.5)
+	glow.Size = UDim2.fromScale(1, sub and 0.5 or 0.8)
+	glow.BackgroundColor3 = color
+	glow.BorderSizePixel = 0
+	glow.Parent = fade
+	local gc = Instance.new("UICorner")
+	gc.CornerRadius = UDim.new(0.5, 0)
+	gc.Parent = glow
+	local gg = Instance.new("UIGradient")
+	gg.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.5, 0.84),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	gg.Parent = glow
+
+	local titleH = sub and 0.6 or 1
+	textLine(fade, "Title", title, color:Lerp(WHITE, 0.25), Enum.Font.BuilderSansExtraBold, UDim2.fromScale(0, 0), UDim2.fromScale(1, titleH), 2)
 	if sub then
-		local s = Instance.new("TextLabel")
-		s.Name = "Sub"
-		s.BackgroundTransparency = 1
-		s.Position = UDim2.fromScale(0, 0.62)
-		s.Size = UDim2.fromScale(1, 0.38)
-		s.Font = Enum.Font.FredokaOne
-		s.TextScaled = true
-		s.Text = sub
-		s.TextColor3 = WHITE
-		s.Parent = bb
-		local ss = Instance.new("UIStroke")
-		ss.Thickness = 2
-		ss.Color = Color3.fromRGB(15, 10, 25)
-		ss.Parent = s
+		local rule = Instance.new("Frame")
+		rule.Name = "Rule"
+		rule.AnchorPoint = Vector2.new(0.5, 0)
+		rule.Position = UDim2.fromScale(0.5, 0.63)
+		rule.Size = UDim2.new(0.4, 0, 0, 1)
+		rule.BackgroundColor3 = color
+		rule.BorderSizePixel = 0
+		rule.Parent = fade
+		local rg = Instance.new("UIGradient")
+		rg.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(0.5, 0.2),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		rg.Parent = rule
+		textLine(fade, "Sub", sub, Color3.fromRGB(235, 232, 245), Enum.Font.BuilderSansMedium, UDim2.fromScale(0.05, 0.68), UDim2.fromScale(0.9, 0.3), 2)
 	end
 	return bb
 end
@@ -122,6 +182,23 @@ local function prompt(parent: Instance, action: string, object: string, name: st
 	pp:SetAttribute("Action", key)
 	pp.Parent = parent
 	return pp
+end
+
+-- Point of interest: drawn on the world map (Client/WorldMap) and gently
+-- framed by the camera when you walk near it (Client/CameraDirector).
+-- kind = "Service" | "Power" | "Travel" | "Danger". opts.Frame = framing
+-- radius in studs (0 = no camera framing), opts.Travel = teleport id.
+local function poi(part: BasePart, name: string, kind: string, desc: string, region: string, opts)
+	opts = opts or {}
+	part:SetAttribute("POIName", name)
+	part:SetAttribute("POIKind", kind)
+	part:SetAttribute("POIDesc", desc)
+	part:SetAttribute("Region", region)
+	part:SetAttribute("FrameRadius", opts.Frame or 22)
+	if opts.Travel then
+		part:SetAttribute("Travel", opts.Travel)
+	end
+	CollectionService:AddTag(part, "POI")
 end
 
 local function emitter(parent: Instance, preset: string, color: Color3, rate: number, offset: Vector3?)
@@ -174,16 +251,24 @@ local function buildLighting()
 	pcall(function()
 		(Lighting :: any).Technology = Enum.Technology.Future
 	end)
-	Lighting.ClockTime = 15.3
+	-- a lower golden-hour sun gives longer, more dramatic shadows
+	Lighting.ClockTime = 16.1
 	Lighting.Brightness = 3
 	Lighting.Ambient = Color3.fromRGB(80, 75, 100)
 	Lighting.OutdoorAmbient = Color3.fromRGB(140, 130, 165)
 	Lighting.EnvironmentDiffuseScale = 1
 	Lighting.EnvironmentSpecularScale = 1
 	Lighting.GlobalShadows = true
-	Lighting.ShadowSoftness = 0.25
-	Lighting.ExposureCompensation = 0.05
-	Lighting.GeographicLatitude = 30
+	Lighting.ShadowSoftness = 0.18
+	Lighting.ExposureCompensation = 0.1
+	Lighting.GeographicLatitude = 35
+
+	-- soft volumetric clouds for depth on the horizon
+	local clouds = workspace.Terrain:FindFirstChildOfClass("Clouds") or Instance.new("Clouds")
+	clouds.Cover = 0.55
+	clouds.Density = 0.6
+	clouds.Color = Color3.fromRGB(255, 244, 250)
+	clouds.Parent = workspace.Terrain
 
 	for _, c in ipairs(Lighting:GetChildren()) do
 		if c:IsA("PostEffect") or c:IsA("Atmosphere") then
@@ -283,7 +368,8 @@ local function lantern(parent, pos: Vector3, color: Color3?)
 	P(parent, { Name = "LanternPost", Size = Vector3.new(0.6, 8, 0.6), CFrame = CFrame.new(pos + Vector3.new(0, 4, 0)), Color = Color3.fromRGB(60, 40, 40), Material = Enum.Material.Wood })
 	P(parent, { Name = "LanternArm", Size = Vector3.new(0.4, 0.4, 2.2), CFrame = CFrame.new(pos + Vector3.new(0, 7.8, 0.9)), Color = Color3.fromRGB(60, 40, 40), Material = Enum.Material.Wood })
 	local lamp = P(parent, { Name = "Lantern", Shape = Enum.PartType.Ball, Size = Vector3.new(1.8, 1.8, 1.8), CFrame = CFrame.new(pos + Vector3.new(0, 6.8, 1.8)), Color = color, Material = Enum.Material.Neon, CanCollide = false })
-	light(lamp, color :: Color3, 18, 1.4, true)
+	local l = light(lamp, color :: Color3, 18, 1.4, true)
+	CollectionService:AddTag(l, "Flicker")
 	return lamp
 end
 
@@ -355,6 +441,7 @@ local function buildHub(map)
 	spawn.Neutral = true
 	emitter(spawn, "Rise", Color3.fromRGB(255, 170, 220), 6)
 	map.HubCFrame = CFrame.new(0, 4, 22)
+	poi(spawn, "Spawn", "Travel", "Where every adventure starts.", "Hub", { Frame = 0, Travel = "Hub" })
 
 	---------------- FORGE (center) ----------------
 	local forgeModel = Instance.new("Model")
@@ -388,14 +475,17 @@ local function buildHub(map)
 	forgeModel.Parent = hub
 	map.Forge = lava
 	map.ForgePrompt = forgePrompt
+	poi(lava, "Forge", "Service", "Smelt ore into Forge levels for your weapon.", "Hub", { Frame = 28, Travel = "Hub" })
 
 	---------------- SELL + UPGRADES ----------------
 	local _, sellCounter = stall(hub, CFrame.new(-40, 0, -20) * CFrame.Angles(0, math.rad(35), 0), Color3.fromRGB(255, 200, 60), "SELL", "Ore -> Coins")
 	map.Sell = sellCounter
 	map.SellPrompt = prompt(sellCounter, "Sell Ore", "Merchant", "SellPrompt", "Sell")
+	poi(sellCounter, "Merchant", "Service", "Sell ore for Coins.", "Hub", { Frame = 20, Travel = "Hub" })
 	local _, upCounter = stall(hub, CFrame.new(40, 0, -20) * CFrame.Angles(0, math.rad(-35), 0), Color3.fromRGB(80, 170, 255), "UPGRADES", "Backpack / Luck / Training")
 	map.Upgrades = upCounter
 	map.UpgradePrompt = prompt(upCounter, "Open Upgrades", "Trainer", "UpgradePrompt", "Upgrades")
+	poi(upCounter, "Upgrades", "Service", "Backpack, Luck and Training upgrades.", "Hub", { Frame = 20, Travel = "Hub" })
 
 	---------------- RACE ALTAR ----------------
 	local altar = Instance.new("Model")
@@ -417,6 +507,7 @@ local function buildHub(map)
 	billboard(orb, "RACE ALTAR", "Roll your bloodline", Color3.fromRGB(190, 150, 255), 5)
 	map.RacePrompt = prompt(orb, "Roll Race", "Race Altar", "RacePrompt", "Race")
 	map.RacePrompt.MaxActivationDistance = 12
+	poi(orb, "Race Altar", "Power", "Roll your anime bloodline.", "Hub", { Frame = 24, Travel = "Hub" })
 	altar.Parent = hub
 
 	---------------- REBIRTH STATUE (giant sword in stone) ----------------
@@ -435,6 +526,7 @@ local function buildHub(map)
 	billboard(pommel, "REBIRTH", "Reset Power for permanent boosts", Color3.fromRGB(255, 215, 90), 4)
 	local holder = P(statue, { Name = "PromptHolder", Size = Vector3.one, Transparency = 1, CanCollide = false, CFrame = CFrame.new(spos + Vector3.new(0, 4, 0)) })
 	map.RebirthPrompt = prompt(holder, "Rebirth", "Sword of Ascension", "RebirthPrompt", "Rebirth")
+	poi(holder, "Sword of Ascension", "Power", "Rebirth for permanent boosts.", "Hub", { Frame = 26, Travel = "Hub" })
 	statue.Parent = hub
 
 	---------------- INDEX + LEADERBOARD ----------------
@@ -488,6 +580,7 @@ local function buildHub(map)
 	end
 	indexBody.Text = table.concat(lines, "\n")
 	map.IndexPrompt = prompt(indexBoard, "Open Index", "Ore Index", "IndexPrompt", "Index")
+	poi(indexBoard, "Ore Index", "Service", "Every ore you have discovered.", "Hub", { Frame = 0, Travel = "Hub" })
 	local _, lbBody = board(Vector3.new(20, 0, 52), "TOP BLADES", Color3.fromRGB(255, 210, 80))
 	lbBody.Text = "Loading..."
 	map.LeaderboardText = lbBody
@@ -539,8 +632,9 @@ local function buildTrain(map)
 	P(train, { Name = "Platform", Size = Vector3.new(math.abs(endX - startX) + 40, 1, 56), CFrame = CFrame.new(centerX, 0.4, 0), Color = Color3.fromRGB(175, 165, 180), Material = Enum.Material.Slate })
 	P(train, { Name = "Trim", Size = Vector3.new(math.abs(endX - startX) + 42, 0.6, 58), CFrame = CFrame.new(centerX, 0.2, 0), Color = Color3.fromRGB(255, 130, 190), Material = Enum.Material.Neon, Transparency = 0.3 })
 	local sign = P(train, { Name = "Sign", Size = Vector3.new(1, 1, 1), Transparency = 1, CanCollide = false, CFrame = CFrame.new(startX + 12, 0, -22) })
-	billboard(sign, "TRAIN AREA", "Swing or stand on a pad to gain Power", Color3.fromRGB(120, 255, 170), 10, 1.2)
+	billboard(sign, "TRAIN AREA", "Swing or stand on a pad to gain Power", Color3.fromRGB(120, 255, 170), 10, 1.2, 18)
 	map.TrainCFrame = CFrame.new(startX + 8, 4, 0) * CFrame.Angles(0, math.rad(90), 0)
+	poi(sign, "Train Grounds", "Power", "Stand on a pad or swing to gain Power.", "Train", { Frame = 0, Travel = "Train" })
 
 	map.TrainPads = {}
 	for i, pad in ipairs(Config.TrainPads) do
@@ -614,6 +708,7 @@ local function buildPortals(map)
 			sub = "Stages 1-" .. Config.StagesPerZone
 		end
 		billboard(surface, zone.Name, sub, accent, 12, 0.85)
+		poi(surface, zone.Name, "Travel", zone.ComingSoon and "Coming soon." or ("Dungeon portal. " .. sub .. "."), "Portals", { Frame = zone.ComingSoon and 0 or 18 })
 		map.Portals[zone.Id] = surface
 	end
 end
@@ -639,6 +734,7 @@ local function buildTower(map)
 	emitter(door, "Vortex", Color3.fromRGB(180, 110, 255), 2)
 	billboard(door, "INFINITE TOWER", "Beat the Guardian before time runs out", Color3.fromRGB(220, 160, 255), 12, 1.1)
 	local pp = prompt(door, "Enter Tower", "Infinite Tower", "TowerPrompt", "Tower")
+	poi(door, "Infinite Tower", "Travel", "Beat each floor's Guardian before time runs out.", "Tower", { Frame = 30, Travel = "Tower" })
 	pp.HoldDuration = 0.4
 	map.TowerPrompt = pp
 	map.TowerCFrame = CFrame.new(c + Vector3.new(-22, 4, 0)) * CFrame.Angles(0, math.rad(90), 0)
@@ -647,17 +743,14 @@ end
 ---------------------------------------------------------------------
 -- DUNGEONS (one linear hall per zone, stage rooms behind power gates)
 ---------------------------------------------------------------------
-local ROOM_LEN = 100
-local ROOM_W = 80
-local START_LEN = 60
+local ROOM_LEN = Config.DungeonLayout.RoomLen
+local ROOM_W = Config.DungeonLayout.RoomWidth
+local START_LEN = Config.DungeonLayout.StartLen
 local WALL_H = 26
 local DOOR_W = 24
 local DOOR_H = 18
 
-local ZONE_ORIGINS = {
-	[1] = Vector3.new(0, 0, -1400),
-	[2] = Vector3.new(700, 0, -1400),
-}
+local ZONE_ORIGINS = Config.DungeonLayout.Origins
 
 local function decorateRoom(parent, zone, center: Vector3, rng: Random)
 	if zone.Style == "Creature" then
@@ -719,13 +812,30 @@ local function buildDungeon(map, zone)
 	P(df, { Name = "BackWall", Size = Vector3.new(ROOM_W + 8, WALL_H, 4), CFrame = CFrame.new(origin.X, WALL_H / 2, origin.Z + START_LEN / 2 + 2), Color = zone.Wall, Material = Enum.Material.Slate })
 	P(df, { Name = "EndWall", Size = Vector3.new(ROOM_W + 8, WALL_H, 4), CFrame = CFrame.new(origin.X, WALL_H / 2, origin.Z + START_LEN / 2 - totalLen - 2), Color = zone.Wall, Material = Enum.Material.Slate })
 
+	-- wall sconces: warm pools of light with real shadows (every other one
+	-- casts shadows to keep the light budget sane) that gently flicker
+	local flameColor = zone.Style == "Creature" and Color3.fromRGB(255, 190, 110) or zone.Accent
+	local count = 0
+	for z = origin.Z + START_LEN / 2 - 20, origin.Z + START_LEN / 2 - totalLen + 10, -40 do
+		for _, side in ipairs({ -1, 1 }) do
+			count += 1
+			local x = origin.X + side * (ROOM_W / 2 - 0.6)
+			P(df, { Name = "SconceBracket", Size = Vector3.new(1.2, 0.5, 1.6), CFrame = CFrame.new(x, 11, z), Color = Color3.fromRGB(40, 36, 42), Material = Enum.Material.Metal })
+			local flame = P(df, { Name = "SconceFlame", Shape = Enum.PartType.Ball, Size = Vector3.one * 1.1, CFrame = CFrame.new(x - side * 0.4, 12, z), Color = flameColor, Material = Enum.Material.Neon, CanCollide = false, CastShadow = false })
+			local l = light(flame, flameColor, 22, 1.3, count % 2 == 0)
+			CollectionService:AddTag(l, "Flicker")
+			emitter(flame, "Fire", flameColor, 3).Size = VFX.NS(0, 0.6, 1, 0)
+		end
+	end
+
 	-- start area: return portal + title
 	local ret = P(df, { Name = "ReturnPortal", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 12, 12), CFrame = CFrame.new(origin + Vector3.new(0, 7, START_LEN / 2 - 3)) * CFrame.Angles(0, math.rad(90), 0), Color = Color3.fromRGB(255, 150, 210), Material = Enum.Material.Neon, Transparency = 0.25, CanCollide = false })
 	emitter(ret, "Vortex", Color3.fromRGB(255, 150, 210), 2).Size = VFX.NS(0, 6, 1, 10)
 	billboard(ret, "RETURN TO HUB", nil, Color3.fromRGB(255, 170, 220), 9, 0.7)
 	CollectionService:AddTag(ret, "ReturnPortal")
+	poi(ret, "Return Portal", "Travel", "Back to the hub.", "Z" .. zone.Id, { Frame = 0 })
 	local titleHolder = P(df, { Name = "ZoneTitle", Size = Vector3.one, Transparency = 1, CanCollide = false, CFrame = CFrame.new(origin + Vector3.new(0, 16, 0)) })
-	billboard(titleHolder, zone.Name, "Zone " .. zone.Id, zone.Accent, 0, 1.3)
+	billboard(titleHolder, zone.Name, "Zone " .. zone.Id, zone.Accent, 0, 1.3, 26)
 
 	local dungeon = { Zone = zone, Origin = origin, StartCFrame = CFrame.new(origin + Vector3.new(0, 4, 18)), Stages = {} }
 
@@ -776,6 +886,7 @@ local function buildDungeon(map, zone)
 			local arena = disc(df, center + Vector3.new(0, 0.1, 0), 50, 0.2, Color3.fromRGB(255, 60, 80), Enum.Material.Neon, "BossArena")
 			arena.Transparency = 0.7
 			arena.CanCollide = false
+			poi(arena, "BOSS: " .. stage.Enemy, "Danger", "Stage " .. stageIndex .. " boss arena.", "S" .. stageIndex, { Frame = 0, Travel = "Stage_" .. stageIndex })
 		end
 
 		dungeon.Stages[stageIndex] = {
@@ -817,6 +928,7 @@ buildChestShrine = function(map)
 	end
 	billboard(lock, "WEAPON CHESTS", "Keys, scrolls and gacha spins", gold, 7, 1)
 	map.ChestPrompt = prompt(base, "Open Chests", "Weapon Shrine", "ChestPrompt", "Chests")
+	poi(base, "Weapon Shrine", "Service", "Weapon chests, keys and gacha spins.", "Hub", { Frame = 22, Travel = "Hub" })
 	shrine.Parent = root:FindFirstChild("Hub") or root
 end
 
@@ -825,6 +937,22 @@ end
 ---------------------------------------------------------------------
 buildAmbient = function(map)
 	local amb = folder("Ambient", root)
+
+	-- ground fog rolling around the plaza edge, the train grounds and the tower
+	for _, spec in ipairs({
+		{ CFrame.new(0, 1.5, -75), Vector3.new(150, 2, 40) },
+		{ CFrame.new(0, 1.5, 80), Vector3.new(150, 2, 40) },
+		{ CFrame.new(-75, 1.5, 0), Vector3.new(40, 2, 110) },
+		{ CFrame.new(75, 1.5, 0), Vector3.new(40, 2, 110) },
+	}) do
+		ambientVolume(amb, spec[1], spec[2], "Fog", Color3.fromRGB(236, 226, 246), 2.5)
+	end
+	ambientVolume(amb, CFrame.new(-175, 2, 0), Vector3.new(160, 2, 60), "Fog", Color3.fromRGB(226, 246, 232), 3)
+	ambientVolume(amb, CFrame.new(160, 2, 0), Vector3.new(60, 2, 60), "Fog", Color3.fromRGB(215, 190, 245), 2)
+	-- dust motes catching the light, and lazy embers drifting off the forge
+	ambientVolume(amb, CFrame.new(0, 8, 0), Vector3.new(170, 16, 170), "Dust", Color3.fromRGB(255, 240, 220), 10)
+	ambientVolume(amb, CFrame.new(0, 5, -30), Vector3.new(36, 6, 36), "FloatEmbers", Color3.fromRGB(255, 150, 60), 5)
+	ambientVolume(amb, CFrame.new(160, 6, 0), Vector3.new(50, 8, 50), "FloatEmbers", Color3.fromRGB(200, 120, 255), 4)
 	local motes = ambientVolume(amb, CFrame.new(0, 10, -10), Vector3.new(180, 16, 180), "Rise", Color3.fromRGB(180, 220, 255), 14)
 	motes.Speed = NumberRange.new(0.5, 1.5)
 	motes.Lifetime = NumberRange.new(3, 5)
@@ -837,7 +965,11 @@ buildAmbient = function(map)
 		local o = dungeon.Origin
 		local len = 60 + 100 * Config.StagesPerZone
 		local cf = CFrame.new(o.X, 3, o.Z + 30 - len / 2)
+		local fogColor = zoneId == 2 and Color3.fromRGB(140, 175, 215) or Color3.fromRGB(215, 240, 215)
+		ambientVolume(amb, cf + Vector3.new(0, -1, 0), Vector3.new(76, 2, len), "Fog", fogColor, 9)
+		ambientVolume(amb, cf + Vector3.new(0, 7, 0), Vector3.new(76, 12, len), "Dust", fogColor, 12)
 		if zoneId == 2 then
+			ambientVolume(amb, cf + Vector3.new(0, 3, 0), Vector3.new(76, 6, len), "FloatEmbers", Color3.fromRGB(0, 230, 255), 8)
 			local dark = ambientVolume(amb, cf, Vector3.new(76, 2, len), "Aura", Color3.fromRGB(110, 40, 180), 30)
 			dark.Transparency = VFX.NS(0, 0.7, 0.5, 0.8, 1, 1)
 			dark.Speed = NumberRange.new(1, 3)

@@ -17,6 +17,9 @@
         "Client": {
           "$path": "src/StarterPlayer/StarterPlayerScripts/Client"
         }
+      },
+      "$properties": {
+        "EnableMouseLockOption": false
       }
     },
     "Workspace": {

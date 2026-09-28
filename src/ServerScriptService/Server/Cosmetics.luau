@@ -5,6 +5,7 @@
 -- player can see them.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
 
 local Shared = ReplicatedStorage:WaitForChild("GameShared")
 local Config = require(Shared:WaitForChild("Config"))
@@ -50,36 +51,48 @@ local function nametag(player: Player, char: Model, data)
 	local tier = Stats.Tier(data)
 	local isMC = race.Id == "MainCharacter"
 
+	-- Minimal name tag: 45% smaller, soft shadow instead of a heavy outline,
+	-- faded in by Client/WorldText only when you are near the player.
+	local S = Config.WorldText.FontScale
 	local bb = Instance.new("BillboardGui")
 	bb.Name = "Nametag"
-	bb.Size = UDim2.fromOffset(240, isMC and 84 or 62)
-	bb.StudsOffset = Vector3.new(0, isMC and 3.4 or 2.9, 0)
+	bb.Size = UDim2.fromOffset(240 * S, (isMC and 84 or 62) * S)
+	bb.StudsOffset = Vector3.new(0, isMC and 3 or 2.6, 0)
 	bb.MaxDistance = 90
 	bb.LightInfluence = 0
+	bb:SetAttribute("Radius", Config.WorldText.NametagRadius)
+	CollectionService:AddTag(bb, "WorldLabel")
 	bb.Parent = head
+	local fade = Instance.new("CanvasGroup")
+	fade.Name = "Fade"
+	fade.BackgroundTransparency = 1
+	fade.Size = UDim2.fromScale(1, 1)
+	fade.GroupTransparency = 1
+	fade.Parent = bb
 	local layout = Instance.new("UIListLayout")
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	layout.Parent = bb
+	layout.Parent = fade
 
 	local function line(text: string, color: Color3, h: number, font: Enum.Font, order: number)
 		local t = Instance.new("TextLabel")
 		t.BackgroundTransparency = 1
-		t.Size = UDim2.new(1, 0, 0, h)
+		t.Size = UDim2.new(1, 0, 0, h * S)
 		t.Font = font
 		t.TextScaled = true
 		t.Text = text
 		t.TextColor3 = color
 		t.LayoutOrder = order
-		t.Parent = bb
+		t.Parent = fade
 		local st = Instance.new("UIStroke")
-		st.Thickness = 2
-		st.Color = Color3.fromRGB(15, 10, 20)
+		st.Thickness = 1
+		st.Color = Color3.fromRGB(10, 8, 18)
+		st.Transparency = 0.45
 		st.Parent = t
 		return t
 	end
 	if isMC then
-		local title = line("MAIN CHARACTER", Color3.fromRGB(255, 220, 90), 20, Enum.Font.LuckiestGuy, 0)
+		local title = line("MAIN CHARACTER", Color3.fromRGB(255, 220, 90), 20, Enum.Font.BuilderSansExtraBold, 0)
 		local g = Instance.new("UIGradient")
 		g.Color = ColorSequence.new({
 			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 240, 160)),
@@ -88,10 +101,10 @@ local function nametag(player: Player, char: Model, data)
 		})
 		g.Parent = title
 	end
-	line(player.DisplayName, Color3.new(1, 1, 1), 28, Enum.Font.FredokaOne, 1)
+	line(player.DisplayName, Color3.new(1, 1, 1), 28, Enum.Font.BuilderSansBold, 1)
 	if data.Race ~= "" then
 		local tierLabel = tier.Label or tier.Id
-		line(string.format("%s %s%s", tierLabel, race.Name, data.Rebirths > 0 and ("  |  R" .. data.Rebirths) or ""), tier.Id == "Common" and race.Color or tier.Color, 20, Enum.Font.FredokaOne, 2)
+		line(string.format("%s %s%s", tierLabel, race.Name, data.Rebirths > 0 and ("  |  R" .. data.Rebirths) or ""), tier.Id == "Common" and race.Color or tier.Color, 20, Enum.Font.BuilderSansMedium, 2)
 	end
 end
 

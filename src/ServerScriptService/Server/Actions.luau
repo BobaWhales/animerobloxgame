@@ -255,6 +255,16 @@ handlers.Settings = function(player, settings)
 	data.Settings.SFX = settings.SFX == true
 end
 
+-- World map fog of war (cosmetic). Only known region keys are accepted.
+handlers.Explore = function(player, key)
+	local data = DataService.Get(player)
+	if type(key) ~= "string" or not Config.ExploreKeys[key] or data.Explored[key] then
+		return
+	end
+	data.Explored[key] = true
+	DataService.MarkDirty(player)
+end
+
 -- First-time players get a free race roll once their client is ready.
 function Actions.InitialRoll(player: Player, delay: number)
 	local data = DataService.Get(player)

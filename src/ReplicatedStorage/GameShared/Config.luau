@@ -95,6 +95,23 @@ for i, stage in ipairs(Config.Stages) do
 end
 Config.StagesPerZone = 5
 
+-- Dungeon hall layout (shared by MapBuilder and the world map).
+Config.DungeonLayout = {
+	Origins = { [1] = Vector3.new(0, 0, -1400), [2] = Vector3.new(700, 0, -1400) },
+	StartLen = 60,
+	RoomLen = 100,
+	RoomWidth = 80,
+}
+
+-- World map fog of war: regions you have walked into (saved per player).
+Config.ExploreKeys = { Hub = true, Train = true, Portals = true, Tower = true }
+for i in ipairs(Config.Stages) do
+	Config.ExploreKeys["S" .. i] = true
+end
+for _, zone in ipairs(Config.Zones) do
+	Config.ExploreKeys["Z" .. zone.Id] = true
+end
+
 Config.EnemyRespawn = 3 -- seconds (normal enemies)
 Config.BossRespawn = 45 -- seconds
 Config.EliteChance = 0.03 -- rare golden "Elite" spawn
@@ -308,6 +325,43 @@ Config.Prompt = {
 	-- Line-of-sight is off by default because several prompts live on parts
 	-- that sit inside other geometry (the lava inside the cauldron rim).
 	RequiresLineOfSight = false,
+}
+
+---------------------------------------------------------------------
+-- CLEAN SCREEN: world text + contextual HUD
+---------------------------------------------------------------------
+-- World labels (station names, portal names, pad multipliers...) are fully
+-- transparent until you walk close. Distances are in studs
+-- (1 m is about 3.6 studs, so 10 studs is about 2.8 m).
+Config.WorldText = {
+	ShowDistance = 10, -- fully visible inside this distance
+	FadeBand = 5, -- starts fading in this many studs further out
+	VerticalSlack = 8, -- labels high above a part still count as "near"
+	FontScale = 0.55, -- 45% smaller than the old labels
+	NametagRadius = 26, -- other players' name tags use a wider radius
+}
+
+-- How long each contextual HUD group stays up after its trigger (seconds).
+Config.Hud = {
+	CombatLinger = 5, -- hotbar + vitals after your last attack / hit
+	DamageLinger = 4, -- vitals after your HP changes
+	StaminaLinger = 2.5, -- vitals after stamina use
+	ResourceLinger = 3.5, -- a resource pill after its value changes
+	LowHealth = 0.3, -- vitals stay up (plus a red vignette) below this HP
+	PlaytimeHeadsUp = 45, -- show the play-time timer this many seconds before a reward
+}
+
+---------------------------------------------------------------------
+-- MOVEMENT + CAMERA FEEL
+---------------------------------------------------------------------
+Config.Sprint = {
+	SpeedMult = 1.4, -- Left Shift / L3
+	FovBoost = 9, -- soft FOV widening while sprinting
+}
+Config.Camera = {
+	FramingWeight = 0.22, -- how strongly the camera leans toward a nearby point of interest
+	FramingPullBack = 2.5, -- extra studs of distance near points of interest
+	FramingFov = -3, -- slight tighten near points of interest
 }
 
 ---------------------------------------------------------------------
@@ -529,17 +583,26 @@ end
 -- Optional catalog ids: HairAccessory / HatAccessory are comma-separated
 -- accessory ids, Shirt / Pants are clothing ids. Leave 0/"" to use the
 -- built-in procedural anime hair + colored outfit.
+-- Silhouette = the big readable shape that identifies the enemy type from
+-- far away. Core = the glowing focal colour (eyes + chest core); the core
+-- dims and flickers as the enemy loses HP, so no head health bar is needed.
+-- Tiers inside a zone: stage 3+ adds armour plating, stage 4+ glowing runes,
+-- bosses get everything. Elites swap to a dark-gold palette.
 Config.EnemyLooks = {
-	[1] = { Hair = "Spiky", HairColor = Color3.fromRGB(255, 200, 60), Skin = Color3.fromRGB(255, 220, 190), Shirt = Color3.fromRGB(40, 40, 60), Pants = Color3.fromRGB(30, 30, 40), Extra = "Headband" },
-	[2] = { Hair = "Long", HairColor = Color3.fromRGB(220, 40, 60), Skin = Color3.fromRGB(240, 200, 170), Shirt = Color3.fromRGB(230, 230, 235), Pants = Color3.fromRGB(40, 40, 50), Extra = "Horns" },
-	[3] = { Hair = "Spiky", HairColor = Color3.fromRGB(90, 60, 40), Skin = Color3.fromRGB(200, 160, 120), Shirt = Color3.fromRGB(200, 120, 40), Pants = Color3.fromRGB(70, 60, 50), Extra = "Headband" },
-	[4] = { Hair = "Bun", HairColor = Color3.fromRGB(30, 30, 40), Skin = Color3.fromRGB(250, 215, 185), Shirt = Color3.fromRGB(60, 80, 160), Pants = Color3.fromRGB(30, 30, 50), Extra = "Mask" },
-	[5] = { Hair = "Long", HairColor = Color3.fromRGB(240, 240, 250), Skin = Color3.fromRGB(245, 215, 195), Shirt = Color3.fromRGB(120, 40, 180), Pants = Color3.fromRGB(30, 20, 40), Extra = "Crown" },
-	[6] = { Hair = "Spiky", HairColor = Color3.fromRGB(0, 230, 255), Skin = Color3.fromRGB(230, 200, 180), Shirt = Color3.fromRGB(40, 45, 60), Pants = Color3.fromRGB(25, 25, 35), Extra = "Visor" },
-	[7] = { Hair = "Bun", HairColor = Color3.fromRGB(255, 120, 200), Skin = Color3.fromRGB(240, 210, 190), Shirt = Color3.fromRGB(60, 60, 80), Pants = Color3.fromRGB(30, 30, 40), Extra = "Visor" },
-	[8] = { Hair = "Spiky", HairColor = Color3.fromRGB(40, 40, 50), Skin = Color3.fromRGB(220, 190, 170), Shirt = Color3.fromRGB(20, 20, 25), Pants = Color3.fromRGB(20, 20, 25), Extra = "Mask" },
-	[9] = { Hair = "Long", HairColor = Color3.fromRGB(0, 255, 180), Skin = Color3.fromRGB(235, 205, 185), Shirt = Color3.fromRGB(30, 60, 60), Pants = Color3.fromRGB(20, 30, 30), Extra = "Visor" },
-	[10] = { Hair = "Spiky", HairColor = Color3.fromRGB(255, 60, 60), Skin = Color3.fromRGB(245, 215, 195), Shirt = Color3.fromRGB(150, 20, 30), Pants = Color3.fromRGB(30, 20, 20), Extra = "Crown" },
+	[1] = { Hair = "Spiky", HairColor = Color3.fromRGB(255, 200, 60), Skin = Color3.fromRGB(255, 220, 190), Shirt = Color3.fromRGB(40, 40, 60), Pants = Color3.fromRGB(30, 30, 40), Extra = "Headband", Silhouette = "Brawler", Core = Color3.fromRGB(120, 255, 150) },
+	[2] = { Hair = "Long", HairColor = Color3.fromRGB(220, 40, 60), Skin = Color3.fromRGB(240, 200, 170), Shirt = Color3.fromRGB(230, 230, 235), Pants = Color3.fromRGB(40, 40, 50), Extra = "Horns", Silhouette = "Oni", Core = Color3.fromRGB(255, 70, 70) },
+	[3] = { Hair = "Spiky", HairColor = Color3.fromRGB(90, 60, 40), Skin = Color3.fromRGB(200, 160, 120), Shirt = Color3.fromRGB(200, 120, 40), Pants = Color3.fromRGB(70, 60, 50), Extra = "Headband", Silhouette = "Golem", Core = Color3.fromRGB(255, 170, 60) },
+	[4] = { Hair = "Bun", HairColor = Color3.fromRGB(30, 30, 40), Skin = Color3.fromRGB(250, 215, 185), Shirt = Color3.fromRGB(60, 80, 160), Pants = Color3.fromRGB(30, 30, 50), Extra = "Mask", Silhouette = "Ronin", Core = Color3.fromRGB(110, 150, 255) },
+	[5] = { Hair = "Long", HairColor = Color3.fromRGB(240, 240, 250), Skin = Color3.fromRGB(245, 215, 195), Shirt = Color3.fromRGB(120, 40, 180), Pants = Color3.fromRGB(30, 20, 40), Extra = "Crown", Silhouette = "Tyrant", Core = Color3.fromRGB(210, 90, 255) },
+	[6] = { Hair = "Spiky", HairColor = Color3.fromRGB(0, 230, 255), Skin = Color3.fromRGB(230, 200, 180), Shirt = Color3.fromRGB(40, 45, 60), Pants = Color3.fromRGB(25, 25, 35), Extra = "Visor", Silhouette = "Drone", Core = Color3.fromRGB(255, 170, 60) },
+	[7] = { Hair = "Bun", HairColor = Color3.fromRGB(255, 120, 200), Skin = Color3.fromRGB(240, 210, 190), Shirt = Color3.fromRGB(60, 60, 80), Pants = Color3.fromRGB(30, 30, 40), Extra = "Visor", Silhouette = "Mech", Core = Color3.fromRGB(120, 200, 255) },
+	[8] = { Hair = "Spiky", HairColor = Color3.fromRGB(40, 40, 50), Skin = Color3.fromRGB(220, 190, 170), Shirt = Color3.fromRGB(20, 20, 25), Pants = Color3.fromRGB(20, 20, 25), Extra = "Mask", Silhouette = "Shinobi", Core = Color3.fromRGB(255, 60, 200) },
+	[9] = { Hair = "Long", HairColor = Color3.fromRGB(0, 255, 180), Skin = Color3.fromRGB(235, 205, 185), Shirt = Color3.fromRGB(30, 60, 60), Pants = Color3.fromRGB(20, 30, 30), Extra = "Visor", Silhouette = "Warden", Core = Color3.fromRGB(0, 255, 180) },
+	[10] = { Hair = "Spiky", HairColor = Color3.fromRGB(255, 60, 60), Skin = Color3.fromRGB(245, 215, 195), Shirt = Color3.fromRGB(150, 20, 30), Pants = Color3.fromRGB(30, 20, 20), Extra = "Crown", Silhouette = "Admiral", Core = Color3.fromRGB(255, 50, 70) },
+}
+Config.EliteLook = {
+	Palette = Color3.fromRGB(38, 32, 28), -- clothes are pulled toward this dark tone
+	Trim = Color3.fromRGB(255, 205, 80), -- plating, runes, eyes and core
 }
 Config.EnemyCatalog = {
 	-- [stageIndex] = { HairAccessory = "", HatAccessory = "", Shirt = 0, Pants = 0, Face = 0 },
@@ -574,7 +637,12 @@ Config.EnemyAI = {
 	SpecialRange = { Normal = 12, Elite = 14, Boss = 26 },
 	Windup = { Normal = 0.9, Elite = 0.8, Boss = 1.1 },
 	SpecialPercent = { Normal = 0.12, Elite = 0.15, Boss = 0.22 },
-	HealthBarShowTime = 6,
+	-- Basic attack rhythm: anticipation (lean back, eyes flare) -> strike ->
+	-- recovery (slumped, core dim). Enemies take extra damage while recovering.
+	Anticipation = { Normal = 0.4, Elite = 0.32, Boss = 0.5 },
+	Recovery = { Normal = 0.6, Elite = 0.45, Boss = 0.9 },
+	SpecialRecovery = { Normal = 1.0, Elite = 0.8, Boss = 1.4 },
+	RecoverDamageMult = 1.25,
 }
 
 -- Player animations (client, played on your own character)

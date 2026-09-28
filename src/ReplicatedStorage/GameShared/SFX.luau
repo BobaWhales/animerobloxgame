@@ -56,14 +56,40 @@ local CUES = {
 		{ S = "Boom", V = 0.15, P = { 1.9, 2.1 } },
 		{ S = "Whoosh", V = 0.2, P = { 1.2, 1.3 } },
 	},
+	-- Impacts are built from four layers: a bright transient "tick", a body
+	-- thump, a short crunch and a tiny tail, each slightly randomised.
 	Hit = {
-		{ S = "Boom", V = 0.3, P = { 2.4, 2.9 } },
-		{ S = "Thud", V = 0.5, P = { 1.3, 1.6 } },
+		{ S = "Blip", V = 0.12, P = { 3.6, 4 } },
+		{ S = "Thud", V = 0.55, P = { 1.3, 1.6 }, Fx = { Bass = 3 } },
+		{ S = "Boom", V = 0.22, P = { 2.6, 3.1 }, Fx = { Distort = 0.35 } },
+		{ S = "Splash", V = 0.06, P = { 2.4, 2.8 }, D = 0.02 },
+	},
+	HitBlade = {
+		{ S = "Slash", V = 0.28, P = { 1.35, 1.55 } },
+		{ S = "Blip", V = 0.1, P = { 3.8, 4.2 } },
+		{ S = "Thud", V = 0.45, P = { 1.5, 1.8 } },
+		{ S = "Unsheath", V = 0.12, P = { 1.8, 2.1 }, D = 0.01 },
+	},
+	HitBlunt = {
+		{ S = "Thud", V = 0.7, P = { 0.9, 1.1 }, Fx = { Bass = 6 } },
+		{ S = "Boom", V = 0.3, P = { 1.9, 2.2 }, Fx = { Distort = 0.45 } },
+		{ S = "Blip", V = 0.08, P = { 3, 3.3 } },
+	},
+	HitEnergy = {
+		{ S = "Splash", V = 0.25, P = { 2.2, 2.6 } },
+		{ S = "Boom", V = 0.22, P = { 2.8, 3.2 } },
+		{ S = "Blip", V = 0.14, P = { 2.6, 3 }, Fx = { Echo = true } },
 	},
 	Crit = {
-		{ S = "Boom", V = 0.55, P = { 1.5, 1.7 }, Fx = { Bass = 6 } },
-		{ S = "Thud", V = 0.6, P = { 1.1, 1.2 } },
-		{ S = "Blip", Chord = { NOTE.C2, NOTE.G2 }, V = 0.35 },
+		{ S = "Blip", V = 0.18, P = 4.2 },
+		{ S = "Boom", V = 0.6, P = { 1.5, 1.7 }, Fx = { Bass = 8 } },
+		{ S = "Thud", V = 0.7, P = { 1, 1.15 } },
+		{ S = "Slash", V = 0.2, P = { 1.8, 2 } },
+		{ S = "Blip", Chord = { NOTE.C2, NOTE.G2 }, V = 0.3, D = 0.03 },
+	},
+	Exposed = {
+		{ S = "Blip", Arp = { NOTE.E2, NOTE.G2 }, Gap = 0.04, V = 0.3 },
+		{ S = "Thud", V = 0.4, P = 1.9 },
 	},
 	AoE = {
 		{ S = "Boom", V = 0.6, P = { 0.9, 1 }, Fx = { Reverb = true } },
@@ -161,13 +187,45 @@ local CUES = {
 		{ S = "Thud", V = 0.6, P = 0.75 },
 		{ S = "Boom", V = 0.15, P = 3 },
 	},
-	UIClick = { { S = "Blip", V = 0.4, P = 1.4 } },
-	UIHover = { { S = "Blip", V = 0.15, P = 2.2 } },
-	UIOpen = {
-		{ S = "Whoosh", V = 0.15, P = 2.2 },
-		{ S = "Blip", V = 0.3, P = 1.2 },
+	-- tactile UI: a crisp "key press" tick with a soft low tap under it
+	UIClick = {
+		{ S = "Blip", V = 0.22, P = 2.9 },
+		{ S = "Thud", V = 0.25, P = 3.3 },
 	},
-	UIClose = { { S = "Blip", V = 0.3, P = 0.9 } },
+	UIHover = { { S = "Blip", V = 0.07, P = { 3.4, 3.6 } } },
+	UIOpen = {
+		{ S = "Whoosh", V = 0.1, P = 2.8 },
+		{ S = "Blip", V = 0.16, P = 2.2 },
+		{ S = "Blip", V = 0.12, P = 2.9, D = 0.05 },
+	},
+	UIClose = {
+		{ S = "Whoosh", V = 0.08, P = 2.4 },
+		{ S = "Blip", V = 0.14, P = 2.2 },
+		{ S = "Blip", V = 0.1, P = 1.7, D = 0.05 },
+	},
+	-- footsteps (one-shot, per floor material)
+	StepStone = {
+		{ S = "Thud", V = 0.16, P = { 2.1, 2.4 }, Fx = { Treble = 3 } },
+		{ S = "Blip", V = 0.02, P = { 4.6, 5 } },
+	},
+	StepGrass = {
+		{ S = "Thud", V = 0.13, P = { 1.6, 1.9 }, Fx = { Muffle = true } },
+		{ S = "Splash", V = 0.035, P = { 3.4, 3.8 }, Fx = { Muffle = true } },
+	},
+	StepWood = {
+		{ S = "Thud", V = 0.2, P = { 1.35, 1.55 }, Fx = { Hollow = true } },
+	},
+	StepMetal = {
+		{ S = "Thud", V = 0.15, P = { 2, 2.2 } },
+		{ S = "Blip", V = 0.035, P = { 3.1, 3.4 }, Fx = { Echo = true } },
+	},
+	StepSoft = {
+		{ S = "Thud", V = 0.1, P = { 1.4, 1.6 }, Fx = { Muffle = true } },
+	},
+	StepHeavy = {
+		{ S = "Thud", V = 0.6, P = { 0.55, 0.65 }, Fx = { Bass = 8 } },
+		{ S = "Boom", V = 0.15, P = { 0.9, 1 }, Fx = { Muffle = true } },
+	},
 	Error = { { S = "Blip", Arp = { 0.7, 0.6 }, Gap = 0.08, V = 0.45 } },
 	Purchase = {
 		{ S = "Blip", Arp = { NOTE.C2, NOTE.E2, NOTE.G2, NOTE.C3 }, Gap = 0.06, V = 0.45 },
@@ -351,6 +409,29 @@ local function addFx(sound: Sound, fx)
 		eq.LowGain = fx.Bass
 		eq.MidGain = 0
 		eq.HighGain = -2
+		eq.Parent = sound
+	end
+	if fx.Treble then
+		local eq = Instance.new("EqualizerSoundEffect")
+		eq.LowGain = -4
+		eq.MidGain = 0
+		eq.HighGain = fx.Treble
+		eq.Parent = sound
+	end
+	if fx.Muffle then
+		-- soft ground: cut the highs
+		local eq = Instance.new("EqualizerSoundEffect")
+		eq.LowGain = 2
+		eq.MidGain = -4
+		eq.HighGain = -18
+		eq.Parent = sound
+	end
+	if fx.Hollow then
+		-- wood: boosted mids for a hollow knock
+		local eq = Instance.new("EqualizerSoundEffect")
+		eq.LowGain = -2
+		eq.MidGain = 6
+		eq.HighGain = -6
 		eq.Parent = sound
 	end
 end

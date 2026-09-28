@@ -1,6 +1,8 @@
 # +1 Loot for Anime
 
-A Roblox (Luau) anime action game built on the *+1 Loot to Forge* loop. It has iconic anime weapons with a rarity/gacha system, avatar enemies with animated special attacks, play-time rewards, and a high-fidelity lighting setup.
+A Roblox (Luau) anime action game built on the *+1 Loot to Forge* loop. It has iconic anime weapons with a rarity/gacha system, avatar enemies with readable silhouettes and telegraphed attacks, play-time rewards, and a high-fidelity lighting setup.
+
+It also has a clean-screen HUD (everything fades in only when needed), proximity-faded world text, a holographic world map with fog of war, material footsteps, sprint, and dynamic camera framing.
 
 - **Play right away:** open `build/PlusOneLootForAnime.rbxlx` in Roblox Studio.
 - **Copy and paste into your own place:** all scripts are in `src/`. [SETUP.md](SETUP.md) shows where each one goes, plus controls and config.

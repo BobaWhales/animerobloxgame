@@ -56,6 +56,7 @@ local DEFAULT = {
 	LastLoginDay = 0,
 	Streak = 0,
 	Cosmetics = { PlaytimeAura = false },
+	Explored = { Hub = true }, -- world map fog of war
 }
 
 local profiles: { [Player]: any } = {}

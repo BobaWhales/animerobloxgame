@@ -10,15 +10,24 @@
 --     cooldown/proximity check -> wind-up anim + ground telegraph ->
 --     release; damage lands on the animation's "Hit" keyframe/marker
 --     (AnimationTrack.KeyframeReached) with a timed fallback.
---   * Head health bar that only shows when damaged or when players are near.
+--   * Modern silhouettes: every enemy type has a distinct readable shape
+--     (pauldrons, horns, straw hat, cape, halo, pylons...) with flat clean
+--     colours and glowing focal points: eyes + a chest core. The core dims
+--     and flickers as HP drops (Client/EnemyFX), so there is no heavy
+--     health bar over their heads.
+--   * Visual tiers: stage 3+ of a zone adds armour plating, stage 4+ glowing
+--     runes; elites switch to a dark-gold palette; bosses get everything.
+--   * Attack rhythm: anticipation (lean back, eyes flare) -> strike ->
+--     recovery (slumped, core dim, takes extra damage). Poses are sent as
+--     model attributes and animated on each client.
 
 local Players = game:GetService("Players")
+local CollectionService = game:GetService("CollectionService")
 local PathfindingService = game:GetService("PathfindingService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("GameShared")
 local Config = require(Shared:WaitForChild("Config"))
-local Format = require(Shared:WaitForChild("Format"))
 local VFX = require(Shared:WaitForChild("VFX"))
 
 local DataService = require(script.Parent:WaitForChild("DataService"))
@@ -70,6 +79,26 @@ local function hairPart(head: BasePart, name: string, size: Vector3, offset: CFr
 	return p
 end
 
+-- Welded decoration on any body part (flat, clean materials).
+local function piece(body: BasePart, name: string, size: Vector3, offset: CFrame, color: Color3, shape: Enum.PartType?, material: Enum.Material?)
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Size = size
+	if shape then
+		p.Shape = shape
+	end
+	p.Color = color
+	p.Material = material or Enum.Material.SmoothPlastic
+	p.CastShadow = material ~= Enum.Material.Neon
+	p.CFrame = body.CFrame * offset
+	weldTo(body, p)
+	return p
+end
+
+local function bodyPart(model: Model, r15: string, r6: string): BasePart?
+	return (model:FindFirstChild(r15) or model:FindFirstChild(r6)) :: any
+end
+
 -- Procedural anime hair + accessories (used when no catalog hair is set).
 local function decorate(model: Model, look)
 	local head = model:FindFirstChild("Head") :: BasePart?
@@ -116,6 +145,151 @@ local function decorate(model: Model, look)
 		end
 	elseif look.Extra == "Visor" then
 		hairPart(head, "Visor", Vector3.new(hs.X * 1.05, u * 0.22, u * 0.1), CFrame.new(0, hs.Y * 0.05, -hs.Z * 0.52), look.HairColor, nil, Enum.Material.Neon)
+	end
+end
+
+-- Silhouette + focal points + tier dressing. level = stage position inside
+-- its zone (1..StagesPerZone); boss looks get the full treatment.
+local STEEL = Color3.fromRGB(58, 62, 74)
+local function stylize(model: Model, look, level: number)
+	local head = model:FindFirstChild("Head") :: BasePart?
+	local torso = bodyPart(model, "UpperTorso", "Torso")
+	local lArm = bodyPart(model, "LeftUpperArm", "Left Arm")
+	local rArm = bodyPart(model, "RightUpperArm", "Right Arm")
+	local lHand = bodyPart(model, "LeftHand", "Left Arm")
+	local rHand = bodyPart(model, "RightHand", "Right Arm")
+	if not head or not torso or not lArm or not rArm then
+		return
+	end
+	local core = look.Core or Color3.fromRGB(255, 80, 80)
+	local ts = torso.Size
+	local hs = head.Size
+	local u = ts.X / 2 -- body unit (about 1 stud at scale 1)
+
+	-- clean, flat materials (no busy textures)
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" and d.Material ~= Enum.Material.Neon then
+			d.Material = Enum.Material.SmoothPlastic
+			d.Reflectance = 0
+		elseif d:IsA("Decal") and d.Name == "face" then
+			d:Destroy()
+		end
+	end
+
+	-- glowing eyes (angled "anime glare" slits)
+	for _, side in ipairs({ -1, 1 }) do
+		local eye = piece(head, "Eye", Vector3.new(hs.X * 0.24, hs.Y * 0.075, hs.Z * 0.06), CFrame.new(side * hs.X * 0.2, hs.Y * 0.04, -hs.Z * 0.5) * CFrame.Angles(0, 0, math.rad(-side * 14)), core, nil, Enum.Material.Neon)
+		eye.CastShadow = false
+	end
+	-- elemental core on the chest
+	local coreBall = piece(torso, "Core", Vector3.one * u * 0.42, CFrame.new(0, ts.Y * 0.12, -ts.Z * 0.5 - 0.02), core, Enum.PartType.Ball, Enum.Material.Neon)
+	local light = Instance.new("PointLight")
+	light.Name = "CoreLight"
+	light.Color = core
+	light.Range = 8
+	light.Brightness = 1.4
+	light.Shadows = false
+	light.Parent = coreBall
+	local ring = piece(torso, "CoreRing", Vector3.new(0.08, u * 0.62, u * 0.62), CFrame.new(0, ts.Y * 0.12, -ts.Z * 0.5 - 0.01) * CFrame.Angles(0, math.rad(90), 0), STEEL, Enum.PartType.Cylinder)
+	ring.CastShadow = false
+
+	local shirt = torso.Color
+	local dark = shirt:Lerp(Color3.new(0, 0, 0), 0.45)
+	local function shoulder(arm: BasePart, side: number, size: Vector3, color: Color3, shape: Enum.PartType?, name: string?)
+		return piece(arm, name or "Pauldron", size, CFrame.new(side * 0.1, arm.Size.Y * 0.38, 0), color, shape)
+	end
+	local sil = look.Silhouette
+	if sil == "Brawler" then
+		for _, pair in ipairs({ { lArm, -1 }, { rArm, 1 } }) do
+			shoulder(pair[1], pair[2], Vector3.new(u * 1.25, u * 0.85, u * 1.15), dark, Enum.PartType.Ball)
+		end
+		for _, hnd in ipairs({ lHand, rHand }) do
+			if hnd then
+				piece(hnd, "Wrap", Vector3.one * u * 0.7, CFrame.new(0, -hnd.Size.Y * 0.2, 0), Color3.fromRGB(235, 230, 220), Enum.PartType.Ball)
+			end
+		end
+	elseif sil == "Oni" then
+		for _, side in ipairs({ -1, 1 }) do
+			piece(head, "BigHorn", Vector3.new(u * 0.26, u * 1.3, u * 0.26), CFrame.new(side * hs.X * 0.38, hs.Y * 0.75, -hs.Z * 0.05) * CFrame.Angles(math.rad(-12), 0, math.rad(-side * 28)), Color3.fromRGB(245, 235, 220), Enum.PartType.Block)
+		end
+		for i = 0, 2 do
+			piece(torso, "Spine", Vector3.new(u * 0.2, u * 0.55 - i * 0.08, u * 0.5), CFrame.new(0, ts.Y * (0.35 - i * 0.3), ts.Z * 0.5 + u * 0.15) * CFrame.Angles(math.rad(35), 0, 0), dark)
+		end
+	elseif sil == "Golem" then
+		local rock = Color3.fromRGB(120, 112, 105)
+		for _, pair in ipairs({ { lArm, -1 }, { rArm, 1 } }) do
+			shoulder(pair[1], pair[2], Vector3.new(u * 1.55, u * 1.15, u * 1.45), rock, Enum.PartType.Ball, "Boulder")
+		end
+		for _, hnd in ipairs({ lHand, rHand }) do
+			if hnd then
+				piece(hnd, "Fist", Vector3.one * u * 1.05, CFrame.new(0, -hnd.Size.Y * 0.3, 0), rock, Enum.PartType.Ball)
+			end
+		end
+		piece(torso, "BackRock", Vector3.new(ts.X * 0.9, ts.Y * 0.8, u * 0.8), CFrame.new(0, ts.Y * 0.2, ts.Z * 0.5 + u * 0.25), rock, Enum.PartType.Ball)
+	elseif sil == "Ronin" then
+		piece(head, "HatBrim", Vector3.new(u * 0.12, u * 3.6, u * 3.6), CFrame.new(0, hs.Y * 0.62, 0) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(205, 175, 110), Enum.PartType.Cylinder)
+		piece(head, "HatCrown", Vector3.new(u * 0.55, u * 1.3, u * 1.3), CFrame.new(0, hs.Y * 0.85, 0) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(190, 160, 95), Enum.PartType.Cylinder)
+		piece(torso, "ScarfTail", Vector3.new(u * 0.45, ts.Y * 1.6, u * 0.08), CFrame.new(u * 0.3, -ts.Y * 0.2, ts.Z * 0.5 + 0.08) * CFrame.Angles(math.rad(12), 0, math.rad(8)), Color3.fromRGB(200, 40, 50))
+	elseif sil == "Tyrant" or sil == "Admiral" then
+		local capeColor = sil == "Tyrant" and Color3.fromRGB(70, 20, 110) or Color3.fromRGB(120, 16, 26)
+		piece(torso, "Cape", Vector3.new(ts.X * 1.15, ts.Y * 2.6, u * 0.08), CFrame.new(0, -ts.Y * 0.75, ts.Z * 0.5 + 0.12) * CFrame.Angles(math.rad(8), 0, 0), capeColor)
+		for _, side in ipairs({ -1, 1 }) do
+			piece(torso, "Collar", Vector3.new(u * 0.12, u * 0.9, u * 0.5), CFrame.new(side * ts.X * 0.28, ts.Y * 0.62, ts.Z * 0.1) * CFrame.Angles(0, 0, math.rad(side * 18)), capeColor:Lerp(Color3.new(1, 1, 1), 0.1))
+		end
+		for _, pair in ipairs({ { lArm, -1 }, { rArm, 1 } }) do
+			local arm, side = pair[1], pair[2]
+			if sil == "Admiral" then
+				piece(arm, "Epaulette", Vector3.new(u * 0.2, u * 1.25, u * 1.25), CFrame.new(side * 0.1, arm.Size.Y * 0.5, 0) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(255, 200, 70), Enum.PartType.Cylinder)
+			else
+				piece(arm, "ShoulderSpike", Vector3.new(u * 0.3, u * 1.1, u * 0.3), CFrame.new(side * 0.2, arm.Size.Y * 0.62, 0) * CFrame.Angles(0, 0, math.rad(-side * 30)), Color3.fromRGB(235, 225, 245))
+			end
+		end
+	elseif sil == "Drone" then
+		for i = 1, 8 do
+			local a = (i / 8) * math.pi * 2
+			piece(head, "Halo", Vector3.new(u * 0.42, u * 0.08, u * 0.14), CFrame.new(math.cos(a) * u * 0.62, hs.Y * 0.95, math.sin(a) * u * 0.62) * CFrame.Angles(0, -a, 0), core, nil, Enum.Material.Neon)
+		end
+		piece(head, "Antenna", Vector3.new(u * 0.06, u * 0.8, u * 0.06), CFrame.new(hs.X * 0.3, hs.Y * 0.7, 0) * CFrame.Angles(0, 0, math.rad(-15)), STEEL)
+		piece(torso, "Pack", Vector3.new(ts.X * 0.7, ts.Y * 0.7, u * 0.5), CFrame.new(0, ts.Y * 0.1, ts.Z * 0.5 + u * 0.22), STEEL)
+	elseif sil == "Mech" then
+		for _, pair in ipairs({ { lArm, -1 }, { rArm, 1 } }) do
+			local plate = shoulder(pair[1], pair[2], Vector3.new(u * 1.35, u * 0.55, u * 1.3), STEEL)
+			piece(plate, "PlateGlow", Vector3.new(u * 1.36, u * 0.08, u * 1.31), CFrame.new(0, -u * 0.18, 0), core, nil, Enum.Material.Neon)
+		end
+		piece(torso, "Pack", Vector3.new(ts.X * 0.85, ts.Y * 0.9, u * 0.6), CFrame.new(0, ts.Y * 0.05, ts.Z * 0.5 + u * 0.28), STEEL)
+		for _, side in ipairs({ -1, 1 }) do
+			piece(torso, "Exhaust", Vector3.new(u * 0.5, u * 0.34, u * 0.34), CFrame.new(side * ts.X * 0.25, -ts.Y * 0.35, ts.Z * 0.5 + u * 0.35) * CFrame.Angles(0, 0, math.rad(90)), core, Enum.PartType.Cylinder, Enum.Material.Neon)
+		end
+	elseif sil == "Shinobi" then
+		for _, side in ipairs({ -1, 1 }) do
+			piece(torso, "ScarfTail", Vector3.new(u * 0.28, ts.Y * 1.9, u * 0.06), CFrame.new(side * u * 0.2, -ts.Y * 0.15, ts.Z * 0.5 + 0.35) * CFrame.Angles(math.rad(35), 0, math.rad(side * 10)), Color3.fromRGB(25, 25, 32))
+		end
+		shoulder(lArm, -1, Vector3.new(u * 1.1, u * 0.45, u * 1.1), STEEL)
+	elseif sil == "Warden" then
+		for _, pair in ipairs({ { lArm, -1 }, { rArm, 1 } }) do
+			local arm, side = pair[1], pair[2]
+			local pylon = piece(arm, "Pylon", Vector3.new(u * 0.36, u * 1.8, u * 0.36), CFrame.new(side * 0.1, arm.Size.Y * 0.5 + u * 0.7, u * 0.1), STEEL)
+			piece(pylon, "PylonTip", Vector3.one * u * 0.36, CFrame.new(0, u * 0.95, 0), core, Enum.PartType.Ball, Enum.Material.Neon)
+		end
+	end
+
+	-- tier dressing
+	local plateColor = STEEL:Lerp(core, 0.12)
+	if level >= 3 then
+		piece(torso, "Plate", Vector3.new(ts.X * 0.86, ts.Y * 0.36, u * 0.12), CFrame.new(0, ts.Y * 0.3, -ts.Z * 0.5 - 0.02), plateColor).Reflectance = 0.15
+		for _, arm in ipairs({ bodyPart(model, "LeftLowerArm", "Left Arm"), bodyPart(model, "RightLowerArm", "Right Arm") }) do
+			if arm then
+				piece(arm, "Plate", Vector3.new(arm.Size.X * 1.15, arm.Size.Y * 0.55, arm.Size.Z * 1.15), CFrame.new(0, 0, 0), plateColor).Reflectance = 0.15
+			end
+		end
+	end
+	if level >= 4 then
+		for _, arm in ipairs({ lArm, rArm }) do
+			piece(arm, "Rune", Vector3.new(0.05, arm.Size.Y * 0.8, 0.12), CFrame.new(arm == lArm and -arm.Size.X * 0.51 or arm.Size.X * 0.51, 0, 0), core, nil, Enum.Material.Neon).Transparency = 0.15
+		end
+		for _, side in ipairs({ -1, 1 }) do
+			piece(torso, "Rune", Vector3.new(0.05, ts.Y * 0.7, 0.1), CFrame.new(side * ts.X * 0.5, -ts.Y * 0.05, -ts.Z * 0.2), core, nil, Enum.Material.Neon).Transparency = 0.15
+		end
 	end
 end
 
@@ -224,6 +398,9 @@ local function buildTemplate(index: number): Model
 	if not catalogHair then
 		decorate(model, look)
 	end
+	local level = ((index - 1) % Config.StagesPerZone) + 1
+	stylize(model, look, level)
+	model:SetAttribute("CoreColor", look.Core or Color3.fromRGB(255, 80, 80))
 	return model
 end
 
@@ -295,67 +472,46 @@ local function waitForHit(track: AnimationTrack?, fallback: number)
 end
 
 ---------------------------------------------------------------------
--- HEALTH BAR
+-- POSES (animated on each client by Client/EnemyFX)
 ---------------------------------------------------------------------
-local function healthBar(e)
-	local head = e.Head
-	local bb = Instance.new("BillboardGui")
-	bb.Name = "HealthGui"
-	bb.Size = UDim2.fromOffset(e.Boss and 260 or 150, e.Boss and 58 or 42)
-	bb.StudsOffset = Vector3.new(0, head.Size.Y * 1.3 + 0.8, 0)
-	bb.MaxDistance = e.Boss and 200 or 90
-	bb.LightInfluence = 0
-	bb.AlwaysOnTop = false
-	bb.Enabled = e.Boss == true
-	bb.Parent = head
-	local name = Instance.new("TextLabel")
-	name.BackgroundTransparency = 1
-	name.Size = UDim2.fromScale(1, 0.5)
-	name.Font = Enum.Font.LuckiestGuy
-	name.TextScaled = true
-	name.Text = e.Name
-	name.TextColor3 = e.Elite and Color3.fromRGB(255, 215, 70) or (e.Boss and Color3.fromRGB(255, 90, 110) or Color3.new(1, 1, 1))
-	name.Parent = bb
-	local ns = Instance.new("UIStroke")
-	ns.Thickness = 2
-	ns.Parent = name
-	local barBg = Instance.new("Frame")
-	barBg.Position = UDim2.fromScale(0, 0.55)
-	barBg.Size = UDim2.fromScale(1, 0.4)
-	barBg.BackgroundColor3 = Color3.fromRGB(25, 20, 30)
-	barBg.BorderSizePixel = 0
-	barBg.Parent = bb
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0.5, 0)
-	corner.Parent = barBg
-	local bs = Instance.new("UIStroke")
-	bs.Thickness = 2
-	bs.Color = Color3.fromRGB(10, 8, 12)
-	bs.Parent = barBg
-	local fill = Instance.new("Frame")
-	fill.Size = UDim2.fromScale(1, 1)
-	fill.BackgroundColor3 = Color3.new(1, 1, 1)
-	fill.BorderSizePixel = 0
-	fill.Parent = barBg
-	local fc = Instance.new("UICorner")
-	fc.CornerRadius = UDim.new(0.5, 0)
-	fc.Parent = fill
-	local grad = Instance.new("UIGradient")
-	grad.Color = ColorSequence.new(Color3.fromRGB(255, 90, 90), Color3.fromRGB(255, 190, 80))
-	grad.Parent = fill
-	local hpText = Instance.new("TextLabel")
-	hpText.BackgroundTransparency = 1
-	hpText.Size = UDim2.fromScale(1, 1)
-	hpText.Font = Enum.Font.FredokaOne
-	hpText.TextScaled = true
-	hpText.TextColor3 = Color3.new(1, 1, 1)
-	hpText.Text = Format.Abbrev(e.HP)
-	hpText.ZIndex = 2
-	hpText.Parent = barBg
-	local hs = Instance.new("UIStroke")
-	hs.Thickness = 1.5
-	hs.Parent = hpText
-	e.Bar, e.Fill, e.HPText = bb, fill, hpText
+-- Anticipate / Strike / Recover / Windup / Stagger / Idle
+local function setPose(e, pose: string, duration: number?)
+	e.PoseId = (e.PoseId or 0) + 1
+	e.Model:SetAttribute("Pose", pose)
+	e.Model:SetAttribute("PoseDur", duration or 0)
+	e.Model:SetAttribute("PoseId", e.PoseId)
+end
+
+-- Elite variant: clothes pulled toward a dark tone, every glowing accent,
+-- plate and rune switched to gold.
+local GLOW_PARTS = { Eye = true, Core = true, Rune = true, PylonTip = true, PlateGlow = true, Halo = true, Exhaust = true }
+local ARMOR_PARTS = { Plate = true, Pauldron = true, CoreRing = true }
+local function applyElitePalette(model: Model)
+	local E = Config.EliteLook
+	for _, d in ipairs(model:GetDescendants()) do
+		local name = d.Name
+		if d:IsA("PointLight") then
+			if name == "CoreLight" then
+				d.Color = E.Trim
+			end
+		elseif d:IsA("BasePart") and name ~= "HumanoidRootPart" then
+			if GLOW_PARTS[name] then
+				d.Color = E.Trim
+			elseif ARMOR_PARTS[name] then
+				d.Color = E.Trim:Lerp(Color3.new(0, 0, 0), 0.35)
+				d.Reflectance = 0.25
+			elseif name ~= "Head" and name:find("Hand") == nil then
+				d.Color = d.Color:Lerp(E.Palette, 0.55)
+			end
+		end
+	end
+	model:SetAttribute("CoreColor", E.Trim)
+	-- gold crest above the brow
+	local head = model:FindFirstChild("Head") :: BasePart?
+	if head then
+		local crest = piece(head, "Crest", Vector3.new(0.12, head.Size.Y * 0.35, head.Size.Z * 0.1), CFrame.new(0, head.Size.Y * 0.42, -head.Size.Z * 0.46) * CFrame.Angles(0, 0, math.rad(45)), E.Trim, nil, Enum.Material.Neon)
+		crest.CastShadow = false
+	end
 end
 
 ---------------------------------------------------------------------
@@ -378,6 +534,9 @@ function EnemyService.Create(opts)
 	end
 	local model = template:Clone()
 	model.Name = opts.Label
+	if opts.Elite then
+		applyElitePalette(model)
+	end
 	local hum = model:FindFirstChildOfClass("Humanoid")
 	local root = model:FindFirstChild("HumanoidRootPart") :: BasePart
 	local head = model:FindFirstChild("Head") :: BasePart
@@ -403,24 +562,31 @@ function EnemyService.Create(opts)
 	if opts.Boss then
 		local aura = Instance.new("Attachment")
 		aura.Parent = root
-		VFX.MakeEmitter("Aura", color, aura, 25).Size = VFX.NS(0, 2 * (opts.Scale or 1), 0.5, 3 * (opts.Scale or 1), 1, 0)
+		local em = VFX.MakeEmitter("Aura", color, aura, 18)
+		em.Size = VFX.NS(0, 1.6 * (opts.Scale or 1), 0.5, 2.4 * (opts.Scale or 1), 1, 0)
+		em.Transparency = VFX.NS(0, 0.55, 0.6, 0.75, 1, 1)
 		local l = Instance.new("PointLight")
 		l.Color = color
 		l.Range = 30
 		l.Brightness = 2
 		l.Shadows = true
 		l.Parent = root
+		-- the camera gently frames bosses you are fighting
+		root:SetAttribute("FrameRadius", 70)
+		CollectionService:AddTag(root, "CameraFocus")
 	end
 	if opts.Elite then
+		-- thin gold outline only (no fill) so the silhouette stays readable
 		local h = Instance.new("Highlight")
-		h.FillColor = Color3.fromRGB(255, 200, 50)
-		h.FillTransparency = 0.75
-		h.OutlineColor = Color3.fromRGB(255, 230, 120)
+		h.FillTransparency = 1
+		h.OutlineColor = Color3.fromRGB(255, 215, 110)
+		h.OutlineTransparency = 0.45
 		h.Parent = model
-		local aura = Instance.new("Attachment")
-		aura.Parent = root
-		VFX.MakeEmitter("Aura", Color3.fromRGB(255, 200, 60), aura, 16)
 	end
+	model:SetAttribute("Boss", opts.Boss == true)
+	model:SetAttribute("Elite", opts.Elite == true)
+	model:SetAttribute("HP", 1)
+	CollectionService:AddTag(model, "Enemy")
 
 	model.Parent = map.Enemies
 	pcall(function()
@@ -456,8 +622,9 @@ function EnemyService.Create(opts)
 		StunnedUntil = 0,
 		LastDamaged = -100,
 		NextPath = 0,
+		RecoverUntil = 0,
+		PoseId = 0,
 	}
-	healthBar(enemy)
 	enemy.Tracks = loadTracks(hum)
 	if enemy.Tracks.Idle then
 		enemy.Tracks.Idle:Play()
@@ -581,6 +748,9 @@ function EnemyService.Stun(e, duration: number)
 	duration = math.min(duration, B.MaxStun) * (e.Boss and 0.3 or 1)
 	e.StunnedUntil = math.max(e.StunnedUntil, os.clock() + duration)
 	e.Humanoid:MoveTo(e.Root.Position)
+	if duration >= 0.25 then
+		setPose(e, "Stagger", duration)
+	end
 end
 
 function EnemyService.Knockback(e, dir: Vector3, force: number)
@@ -759,7 +929,7 @@ function EnemyService.Kill(enemy, killer: Player?)
 	end
 	enemy.Dead = true
 	enemy.Humanoid.WalkSpeed = 0
-	enemy.Bar.Enabled = false
+	enemy.Model:SetAttribute("HP", 0)
 	Net.FXAll("Kill", { Model = enemy.Model, Color = enemy.Color, Big = enemy.Boss, Elite = enemy.Elite, Pos = enemy.Root.Position, By = killer })
 	if killer and EnemyService.OnKill then
 		task.spawn(EnemyService.OnKill, killer, enemy)
@@ -791,14 +961,17 @@ function EnemyService.Damage(enemy, player: Player, amount: number, crit: boolea
 	if enemy.Dead or (enemy.Owner and enemy.Owner ~= player) then
 		return
 	end
+	-- punish window: enemies recovering from an attack take extra damage
+	local exposed = os.clock() < enemy.RecoverUntil
+	if exposed then
+		amount *= AI.RecoverDamageMult
+	end
 	amount = math.max(1, math.floor(amount))
 	enemy.HP -= amount
 	enemy.Damagers[player] = true
 	enemy.LastDamaged = os.clock()
-	enemy.Bar.Enabled = true
-	enemy.Fill.Size = UDim2.fromScale(math.clamp(enemy.HP / enemy.MaxHP, 0, 1), 1)
-	enemy.HPText.Text = Format.Abbrev(math.max(0, enemy.HP))
-	Net.FXAll("Hit", { Pos = enemy.Root.Position + Vector3.new(0, enemy.Scale, 0), Amount = amount, Crit = crit, Model = enemy.Model, Color = enemy.Color, By = player })
+	enemy.Model:SetAttribute("HP", math.clamp(enemy.HP / enemy.MaxHP, 0, 1))
+	Net.FXAll("Hit", { Pos = enemy.Root.Position + Vector3.new(0, enemy.Scale, 0), Amount = amount, Crit = crit, Model = enemy.Model, Color = enemy.Color, By = player, Exposed = exposed, Boss = enemy.Boss })
 	if enemy.HP <= 0 then
 		EnemyService.Kill(enemy, player)
 	end
@@ -890,27 +1063,55 @@ local function moveToward(e, goal: Vector3)
 	end
 end
 
+-- Basic attack: anticipation (slow wind-up, lean back, eyes flare) ->
+-- strike (animation snaps forward, damage on the "Hit" marker) ->
+-- recovery (slumped, core dim, takes extra damage).
 local function basicAttack(e, target)
+	local tier = tierKey(e)
+	local antic = AI.Anticipation[tier]
+	local recover = AI.Recovery[tier]
 	e.State = "Attack"
 	e.LastBasic = os.clock()
 	e.Humanoid:MoveTo(e.Root.Position)
 	face(e, target.Root.Position)
 	local track = e.Tracks.BasicAttack
 	if track then
-		track:Play(0.05)
+		track:Play(0.1)
+		track:AdjustSpeed(0.25) -- slow "coil" during anticipation
 	end
-	Net.FXAll("EnemySwipe", { Pos = e.Root.Position, Target = target.Root.Position, Color = e.Color })
+	setPose(e, "Anticipate", antic)
 	task.spawn(function()
-		waitForHit(track, Config.EnemyAnims.BasicHitTime)
+		task.wait(antic)
+		if e.Dead or e.Ragdolled or os.clock() < e.StunnedUntil then
+			if track then
+				track:Stop(0.15)
+			end
+			e.State = "Chase"
+			return
+		end
+		face(e, target.Root.Position)
+		if track then
+			track:AdjustSpeed(1.5) -- snap into the strike
+		end
+		setPose(e, "Strike", 0.15)
+		Net.FXAll("EnemySwipe", { Pos = e.Root.Position, Target = target.Root.Position, Color = e.Color })
+		waitForHit(track, Config.EnemyAnims.BasicHitTime / 1.5)
 		if not e.Dead and not e.Ragdolled and os.clock() >= e.StunnedUntil and target.Root.Parent then
 			local reach = Config.EnemyAttackRange + e.Radius
 			if (target.Root.Position - e.Root.Position).Magnitude <= reach * 1.2 then
 				EnemyService.HitPlayer(target.Player, e.HitPercent, e.Root.Position)
 			end
 		end
-		task.wait(0.25)
+		if e.Dead then
+			return
+		end
+		-- recovery: a readable, punishable opening
+		e.RecoverUntil = os.clock() + recover
+		setPose(e, "Recover", recover)
+		task.wait(recover)
 		if e.State == "Attack" then
 			e.State = "Chase"
+			setPose(e, "Idle", 0.3)
 		end
 	end)
 end
@@ -919,7 +1120,7 @@ end
 local function specialAttack(e, target)
 	local tier = tierKey(e)
 	e.State = "Windup"
-	e.NextSpecial = os.clock() + AI.SpecialCooldown[tier]
+	e.NextSpecial = os.clock() + AI.SpecialCooldown[tier] + AI.SpecialRecovery[tier]
 	e.Humanoid:MoveTo(e.Root.Position)
 	face(e, target.Root.Position)
 	local windup = AI.Windup[tier]
@@ -936,6 +1137,7 @@ local function specialAttack(e, target)
 		wind:Play(0.1)
 		wind:AdjustSpeed(math.clamp(wind.Length / windup, 0.5, 2))
 	end
+	setPose(e, "Windup", windup)
 	Net.FXAll("EnemyWindup", {
 		Model = e.Model,
 		Kind = kind,
@@ -959,6 +1161,7 @@ local function specialAttack(e, target)
 		if release then
 			release:Play(0.05)
 		end
+		setPose(e, "Strike", 0.2)
 		if kind == "Lunge" then
 			e.Root.AssemblyLinearVelocity = dir * 70 + Vector3.new(0, 5, 0)
 		end
@@ -987,8 +1190,16 @@ local function specialAttack(e, target)
 				end
 			end
 		end
-		task.wait(0.5)
-		e.State = "Chase"
+		-- long recovery after a special: the big punish window
+		local recover = AI.SpecialRecovery[tier]
+		e.State = "Recover"
+		e.RecoverUntil = os.clock() + recover
+		setPose(e, "Recover", recover)
+		task.wait(recover)
+		if e.State == "Recover" then
+			e.State = "Chase"
+			setPose(e, "Idle", 0.3)
+		end
 	end)
 end
 
@@ -996,7 +1207,7 @@ local function stepAI()
 	local roots = playerRoots()
 	local t = os.clock()
 	for _, e in ipairs(EnemyService.Active) do
-		if not e.Dead and e.Root.Parent and not e.Ragdolled and t >= e.StunnedUntil and e.State ~= "Windup" and e.State ~= "Attack" then
+		if not e.Dead and e.Root.Parent and not e.Ragdolled and t >= e.StunnedUntil and e.State ~= "Windup" and e.State ~= "Attack" and e.State ~= "Recover" then
 			local epos = e.Root.Position
 			local target, targetDist = nil, math.huge
 			local nearest = math.huge
@@ -1006,11 +1217,6 @@ local function stepAI()
 				if (not e.Owner or e.Owner == pr.Player) and d < Config.EnemyAggroRange * (e.Boss and 1.6 or 1) and d < targetDist and inBounds(e, pr.Root.Position, 6) then
 					target, targetDist = pr, d
 				end
-			end
-			-- health bar only while recently damaged or players are in aggro range
-			local showBar = e.Boss or (t - e.LastDamaged < AI.HealthBarShowTime) or nearest < Config.EnemyAggroRange
-			if e.Bar.Enabled ~= showBar then
-				e.Bar.Enabled = showBar
 			end
 			if nearest < 220 then
 				if target then
