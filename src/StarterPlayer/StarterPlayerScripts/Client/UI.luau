@@ -28,7 +28,7 @@ local screen: ScreenGui
 local root: Frame
 local uiScale: UIScale
 local flyGui: ScreenGui
-local pills = {}
+local pills: { [string]: any } = {}
 local panels = {}
 local current = nil
 local dim: Frame
@@ -36,6 +36,11 @@ local toastHolder: Frame
 local padLabel: TextLabel
 local zoneBanner: Frame
 local towerHud: Frame
+local stageHud: Frame
+local eventRow: Frame
+local menuHint: TextLabel
+local adminButton: GuiObject
+local DRAWER_X = 204
 local drawer: CanvasGroup
 local drawerOpen = false
 local numberValues = {}
@@ -141,7 +146,7 @@ local function softLabel(parent: Instance, props)
 	local t = Instance.new("TextLabel")
 	t.Name = props.Name or "Label"
 	t.BackgroundTransparency = 1
-	t.Font = props.Font or Enum.Font.BuilderSansBold
+	t.Font = props.Font or Config.Fonts.Heading
 	t.TextScaled = true
 	t.Text = props.Text or ""
 	t.TextColor3 = props.Color or C.Text
@@ -167,15 +172,16 @@ local function softLabel(parent: Instance, props)
 	return t
 end
 
--- Resource pills are hidden by default and fade in for a few seconds when
--- their value changes (or while the menu drawer / a panel is open).
-local function makePill(parent, key: string, role: string, color: Color3, order: number)
+-- Currency pills (left stack). Pinned pills are always shown (simulator
+-- style); the others fade in for a few seconds when their value changes (or
+-- while the menu drawer / a panel is open). Clicking one opens its menu.
+local function makePill(parent, key: string, role: string, color: Color3, order: number, pinned: boolean?, panelName: string?)
 	local holder = Instance.new("CanvasGroup")
 	holder.Name = key
 	holder.BackgroundTransparency = 1
-	holder.GroupTransparency = 1
-	holder.Visible = false
-	holder.Size = UDim2.fromOffset(150, 40)
+	holder.GroupTransparency = pinned and 0 or 1
+	holder.Visible = pinned == true
+	holder.Size = UDim2.fromOffset(170, 42)
 	holder.LayoutOrder = order
 	holder.Parent = parent
 	local f
@@ -192,21 +198,36 @@ local function makePill(parent, key: string, role: string, color: Color3, order:
 		f.Size = UDim2.fromScale(1, 1)
 		f.Parent = holder
 	else
-		f = frame(holder, { Color = Color3.fromRGB(10, 8, 22), Transparency = 0.4, Corner = 20 })
+		f = frame(holder, { Color = Color3.fromRGB(10, 8, 18), Transparency = 0.25, Corner = 8 })
 		local st = Instance.new("UIStroke")
 		st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-		st.Thickness = 1
+		st.Thickness = 1.5
 		st.Color = color
-		st.Transparency = 0.55
+		st.Transparency = 0.45
 		st.Parent = f
+		local chip = frame(f, { Color = color, Transparency = 0.75, Size = UDim2.new(0, 38, 1, 0), Corner = 8 })
+		chip.Name = "Chip"
 	end
 	f.Name = "Pill"
-	UITheme.Icon(f, role, UDim2.fromOffset(26, 26), UDim2.fromOffset(8, 7))
-	local value = softLabel(f, { Name = "Value", Text = "0", Size = UDim2.new(1, -46, 0, 19), Position = UDim2.fromOffset(40, 3), XAlign = Enum.TextXAlignment.Left })
-	local sub = softLabel(f, { Name = "Sub", Text = "", Font = Enum.Font.BuilderSansMedium, Size = UDim2.new(1, -46, 0, 13), Position = UDim2.fromOffset(40, 23), XAlign = Enum.TextXAlignment.Left, Color = color })
+	UITheme.Icon(f, role, UDim2.fromOffset(26, 26), UDim2.fromOffset(6, 8))
+	local value = softLabel(f, { Name = "Value", Text = "0", Font = Config.Fonts.Display, Size = UDim2.new(1, -50, 0, 21), Position = UDim2.fromOffset(44, 3), XAlign = Enum.TextXAlignment.Left })
+	local sub = softLabel(f, { Name = "Sub", Text = "", Font = Config.Fonts.Body, Size = UDim2.new(1, -50, 0, 13), Position = UDim2.fromOffset(44, 25), XAlign = Enum.TextXAlignment.Left, Color = color })
 	local sc = Instance.new("UIScale")
 	sc.Parent = f
-	pills[key] = { Holder = holder, Frame = f, Value = value, Sub = sub, Scale = sc, Color = color, Until = 0, Alpha = 0 }
+	if panelName then
+		local click = Instance.new("TextButton")
+		click.Name = "Click"
+		click.BackgroundTransparency = 1
+		click.Text = ""
+		click.Size = UDim2.fromScale(1, 1)
+		click.ZIndex = 5
+		click.Parent = holder
+		click.Activated:Connect(function()
+			SFX.Play("UIClick")
+			UI.Toggle(panelName)
+		end)
+	end
+	pills[key] = { Holder = holder, Frame = f, Value = value, Sub = sub, Scale = sc, Color = color, Until = 0, Alpha = pinned and 1 or 0, Pinned = pinned == true }
 end
 
 -- Show a resource pill for a few seconds.
@@ -322,24 +343,33 @@ end
 -- PANEL FRAMEWORK
 ---------------------------------------------------------------------
 local function makePanel(name: string, title: string, size: Vector2, accent: Color3)
-	local panelFrame, content = UITheme.Panel(root, { Name = name, Size = UDim2.fromOffset(size.X, size.Y), ZIndex = 5 })
+	local panelFrame, content = UITheme.Panel(root, { Name = name, Size = UDim2.fromOffset(size.X, size.Y), ZIndex = 5, Accent = accent })
 	panelFrame.Visible = false
 	local sc = Instance.new("UIScale")
 	sc.Parent = panelFrame
 
-	local header = frame(panelFrame, { Color = accent, Size = UDim2.new(0.6, 0, 0, 54), Position = UDim2.new(0.5, 0, 0, -22), AnchorPoint = Vector2.new(0.5, 0), Corner = 16, Stroke = 4 })
+	-- consistent header: a slanted accent tab riding the top-left edge, a thin
+	-- accent rule across the top, and a square close button
+	local tabWidth = math.clamp(#title * 19 + 56, 150, size.X - 90)
+	local header = frame(panelFrame, { Color = accent, Size = UDim2.fromOffset(tabWidth, 46), Position = UDim2.fromOffset(20, -20), Corner = 8, Stroke = 2 })
 	header.Name = "Header"
-	UITheme.Gradient(header, Color3.new(1, 1, 1), Color3.fromRGB(170, 170, 170), 90)
-	UITheme.Label(header, { Text = title, Title = true, Size = UDim2.new(1, -20, 1, -10), Position = UDim2.fromOffset(10, 5), MaxText = 34, StrokeThickness = 3 })
+	header.Rotation = -2
+	UITheme.Gradient(header, Color3.new(1, 1, 1), Color3.fromRGB(165, 165, 165), 90)
+	local notch = frame(header, { Color = Color3.fromRGB(10, 8, 18), Transparency = 0.2, Size = UDim2.fromOffset(6, 26), Position = UDim2.new(0, 12, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5), Corner = 2 })
+	notch.Name = "Notch"
+	UITheme.Label(header, { Text = title, Title = true, Size = UDim2.new(1, -40, 1, -8), Position = UDim2.fromOffset(28, 4), XAlign = Enum.TextXAlignment.Left, MaxText = 32, StrokeThickness = 2.5 })
+	local rule = frame(panelFrame, { Color = accent, Transparency = 0.25, Size = UDim2.new(1, -tabWidth - 60, 0, 2), Position = UDim2.fromOffset(tabWidth + 30, 12) })
+	rule.Name = "Rule"
 
 	UITheme.Button(panelFrame, {
 		Name = "Close",
 		Text = "X",
 		Color = "Red",
-		Size = UDim2.fromOffset(48, 48),
-		Position = UDim2.new(1, 10, 0, -14),
+		Size = UDim2.fromOffset(42, 42),
+		Position = UDim2.new(1, 8, 0, -12),
 		AnchorPoint = Vector2.new(1, 0),
-		MaxText = 30,
+		MaxText = 26,
+		Corner = 8,
 		Sound = "UIClose",
 		OnClick = function()
 			UI.Close()
@@ -353,7 +383,7 @@ local function makePanel(name: string, title: string, size: Vector2, accent: Col
 	body.Size = UDim2.new(1, 0, 1, -40)
 	body.Parent = content
 
-	local panel = { Frame = panelFrame, Body = body, Scale = sc, Mode = nil, Sig = nil, Refresh = nil }
+	local panel = { Frame = panelFrame, Body = body, Scale = sc, Mode = nil, Sig = nil, Refresh = nil, Accent = accent }
 	panels[name] = panel
 	return panel
 end
@@ -425,32 +455,43 @@ function UI.Close()
 end
 
 local function rowFrame(parent, height: number, order: number, color: Color3?)
-	local f = frame(parent, { Color = color or Color3.fromRGB(34, 28, 56), Transparency = 0.1, Size = UDim2.new(1, 0, 0, height), Order = order, Corner = 12, Stroke = 2 })
-	UITheme.Gradient(f, Color3.new(1, 1, 1), Color3.fromRGB(190, 185, 210), 90)
+	local f = frame(parent, { Color = color or C.Row, Size = UDim2.new(1, 0, 0, height), Order = order, Corner = 10 })
+	local st = UITheme.Stroke(f, 1, C.Line, true)
+	st.Transparency = 0.35
+	UITheme.Gradient(f, Color3.new(1, 1, 1), Color3.fromRGB(200, 196, 215), 90)
 	return f
+end
+
+-- Thin coloured bar on the left edge of a row (rarity / accent marker).
+local function accentBar(row: GuiObject, color: Color3)
+	local b = frame(row, { Color = color, Size = UDim2.new(0, 4, 1, -14), Position = UDim2.fromOffset(6, 7), Corner = 2 })
+	b.Name = "Accent"
+	return b
 end
 
 ---------------------------------------------------------------------
 -- PANELS
 ---------------------------------------------------------------------
 local function buildUpgrades()
-	local p = makePanel("Upgrades", "UPGRADES", Vector2.new(640, 430), C.Blue)
-	local holder = frame(p.Body, { Transparency = 1 })
+	local p = makePanel("Upgrades", "UPGRADES", Vector2.new(660, 450), C.Blue)
+	UITheme.Label(p.Body, { Text = "Levels never cap. Prices climb linearly to level " .. Config.UpgradeLinearUntil .. ", then grow exponentially.", Size = UDim2.new(1, 0, 0, 22), Color = C.Sub, MaxText = 15 })
+	local holder = frame(p.Body, { Transparency = 1, Size = UDim2.new(1, 0, 1, -30), Position = UDim2.fromOffset(0, 30) })
 	list(holder, 10)
 	local rows = {}
-	local order = { "Backpack", "Luck", "Training" }
 	local icons = { Backpack = "Icon_Backpack", Luck = "Icon_Gem", Training = "Icon_Power" }
-	for i, key in ipairs(order) do
+	local colors = { Backpack = C.Gold, Luck = C.Green, Training = C.Red }
+	for i, key in ipairs(Config.UpgradeOrder) do
 		local cfg = Config.Upgrades[key]
-		local r = rowFrame(holder, 104, i)
-		UITheme.Icon(r, icons[key], UDim2.fromOffset(64, 64), UDim2.fromOffset(16, 20))
-		UITheme.Label(r, { Text = cfg.Name, Title = true, Size = UDim2.new(0.45, 0, 0, 34), Position = UDim2.fromOffset(96, 10), XAlign = Enum.TextXAlignment.Left, MaxText = 30 })
-		local lvl = UITheme.Label(r, { Text = "", Size = UDim2.new(0.45, 0, 0, 24), Position = UDim2.fromOffset(96, 44), XAlign = Enum.TextXAlignment.Left, Color = C.Sub, MaxText = 20 })
-		local val = UITheme.Label(r, { Text = "", Size = UDim2.new(0.45, 0, 0, 22), Position = UDim2.fromOffset(96, 70), XAlign = Enum.TextXAlignment.Left, Color = C.Green, MaxText = 18, Rich = true })
+		local r = rowFrame(holder, 108, i)
+		accentBar(r, colors[key])
+		UITheme.Icon(r, icons[key], UDim2.fromOffset(60, 60), UDim2.fromOffset(20, 24))
+		UITheme.Label(r, { Text = cfg.Name, Title = true, Size = UDim2.new(0.45, 0, 0, 32), Position = UDim2.fromOffset(94, 8), XAlign = Enum.TextXAlignment.Left, MaxText = 28 })
+		local lvl = UITheme.Label(r, { Text = "", Size = UDim2.new(0.5, 0, 0, 22), Position = UDim2.fromOffset(94, 42), XAlign = Enum.TextXAlignment.Left, Color = C.Sub, MaxText = 17, Rich = true })
+		local val = UITheme.Label(r, { Text = "", Size = UDim2.new(0.5, 0, 0, 22), Position = UDim2.fromOffset(94, 70), XAlign = Enum.TextXAlignment.Left, Color = C.Green, MaxText = 17, Rich = true })
 		local btn = UITheme.Button(r, {
 			Text = "Buy",
 			Color = "Gold",
-			Size = UDim2.fromOffset(170, 64),
+			Size = UDim2.fromOffset(180, 62),
 			Position = UDim2.new(1, -16, 0.5, 0),
 			AnchorPoint = Vector2.new(1, 0.5),
 			Sound = "Purchase",
@@ -461,20 +502,20 @@ local function buildUpgrades()
 		rows[key] = { Level = lvl, Value = val, Button = btn }
 	end
 	p.Refresh = function(d)
-		local extra = d.Passes and d.Passes.DoubleTraining
 		for key, r in pairs(rows) do
-			local lvl = d.Upgrades[key]
+			local u = Config.Upgrades[key]
+			local lvl = d.Upgrades[key] or 0
 			local cost = d.UpgradeCosts[key]
-			r.Level.Text = "Level " .. lvl .. " / " .. Config.Upgrades[key].Max
+			local expo = lvl >= Config.UpgradeLinearUntil
+			r.Level.Text = "Level <b>" .. Format.Commas(lvl) .. "</b>  " .. (expo and '<font color="#ff64b9">EXPONENTIAL</font>' or ("linear until " .. Config.UpgradeLinearUntil))
 			if key == "Backpack" then
-				r.Value.Text = string.format("Capacity: <b>%s</b> -> %s", Format.Abbrev(d.BackpackMax), Format.Abbrev(d.BackpackMax + 10))
-			elseif key == "Luck" then
-				r.Value.Text = string.format("Luck: <b>x%.2f</b> -> x%.2f", 1 + lvl * 0.05, 1 + (lvl + 1) * 0.05)
+				r.Value.Text = string.format("Ore bag: <b>%s</b> -> %s", Format.Abbrev(d.BackpackMax), Format.Abbrev(d.BackpackMax + u.Per))
 			else
-				local per = extra and 20 or 10
-				r.Value.Text = string.format("Power gain: <b>+%d%%</b> -> +%d%%", lvl * per, (lvl + 1) * per)
+				local now = math.floor(lvl * u.Per * 100 + 0.5)
+				local nxt = math.floor((lvl + 1) * u.Per * 100 + 0.5)
+				r.Value.Text = string.format("%s: <b>+%s%%</b> -> +%s%%", key == "Luck" and "Luck" or "Power gain", Format.Abbrev(now), Format.Abbrev(nxt))
 			end
-			UITheme.SetButtonText(r.Button, cost and cost >= 0 and (Format.Abbrev(cost) .. " Coins") or "MAXED")
+			UITheme.SetButtonText(r.Button, cost and cost >= 0 and (Format.Abbrev(cost) .. " Coins") or "...")
 		end
 	end
 end
@@ -528,12 +569,12 @@ local function buildRace()
 end
 
 local function buildBackpack()
-	local p = makePanel("Backpack", "BACKPACK", Vector2.new(640, 470), C.Gold)
+	local p = makePanel("Backpack", "ORE BAG", Vector2.new(660, 480), C.Gold)
 	local items = scroller(p.Body, { Size = UDim2.new(1, 0, 1, -96) })
 	list(items, 6)
 	local footer = frame(p.Body, { Transparency = 1, Size = UDim2.new(1, 0, 0, 86), Position = UDim2.new(0, 0, 1, 0), AnchorPoint = Vector2.new(0, 1) })
-	local capBg = frame(footer, { Color = Color3.fromRGB(20, 16, 30), Size = UDim2.new(0.5, 0, 0, 30), Position = UDim2.fromOffset(0, 8), Corner = 15, Stroke = 2 })
-	local capFill = frame(capBg, { Color = C.Gold, Size = UDim2.fromScale(0, 1), Corner = 15 })
+	local capBg = frame(footer, { Color = Color3.fromRGB(12, 10, 20), Size = UDim2.new(0.5, 0, 0, 30), Position = UDim2.fromOffset(0, 8), Corner = 8, Stroke = 2 })
+	local capFill = frame(capBg, { Color = C.Gold, Size = UDim2.fromScale(0, 1), Corner = 8 })
 	UITheme.Gradient(capFill, Color3.new(1, 1, 1), Color3.fromRGB(200, 150, 60), 90)
 	local capText = UITheme.Label(capBg, { Text = "", Size = UDim2.fromScale(1, 1), ZIndex = 3, MaxText = 18 })
 	local hint = UITheme.Label(footer, { Text = "", Size = UDim2.new(0.5, 0, 0, 34), Position = UDim2.fromOffset(0, 44), Color = C.Sub, MaxText = 15, XAlign = Enum.TextXAlignment.Left })
@@ -541,21 +582,17 @@ local function buildBackpack()
 	local actionBtn = UITheme.Button(footer, {
 		Text = "SELL ALL",
 		Color = "Gold",
-		Size = UDim2.fromOffset(250, 76),
+		Size = UDim2.fromOffset(250, 72),
 		Position = UDim2.new(1, 0, 0.5, 0),
 		AnchorPoint = Vector2.new(1, 0.5),
 		MaxText = 28,
 		OnClick = function()
-			if p.Mode == "Sell" then
-				request("Sell")
-			else
-				request("Forge")
-			end
+			request("Sell")
 		end,
 	})
 	p.Refresh = function(d)
-		local mode = p.Mode or "View"
-		local sigParts = { mode, d.BackpackMax, math.floor(d.Derived.CoinMult * 100), math.floor(d.Derived.ForgeMult * 100) }
+		local mode = p.Mode == "Sell" and "Sell" or "View"
+		local sigParts = { mode, d.BackpackMax, math.floor(d.Derived.CoinMult * 100) }
 		for _, ore in ipairs(Config.Ores) do
 			table.insert(sigParts, d.Backpack[ore.Id] or 0)
 		end
@@ -570,22 +607,23 @@ local function buildBackpack()
 			local count = d.Backpack[ore.Id] or 0
 			if count > 0 then
 				any = true
-				local r = rowFrame(items, 62, i)
-				local gem = frame(r, { Color = ore.Color, Size = UDim2.fromOffset(32, 32), Position = UDim2.fromOffset(16, 15), Stroke = 2 })
+				local r = rowFrame(items, 64, i)
+				accentBar(r, Config.Rarity[ore.Rarity].Color)
+				local gem = frame(r, { Color = ore.Color, Size = UDim2.fromOffset(30, 30), Position = UDim2.fromOffset(34, 32), AnchorPoint = Vector2.new(0.5, 0.5), Stroke = 2 })
 				gem.Rotation = 45
-				UITheme.Label(r, { Text = ore.Name, Title = true, Size = UDim2.fromOffset(220, 28), Position = UDim2.fromOffset(62, 6), XAlign = Enum.TextXAlignment.Left, Color = ore.Color, MaxText = 22 })
-				UITheme.Label(r, { Text = Config.Rarity[ore.Rarity].Label .. "  x" .. Format.Commas(count), Size = UDim2.fromOffset(220, 22), Position = UDim2.fromOffset(62, 34), XAlign = Enum.TextXAlignment.Left, Color = C.Sub, MaxText = 16 })
-				local valueText = mode == "Sell" and ("+" .. Format.Abbrev(ore.Sell * count * d.Derived.CoinMult) .. " Coins") or ("+" .. Format.Abbrev(ore.Forge * count * d.Derived.ForgeMult) .. " Blade")
-				UITheme.Label(r, { Text = valueText, Size = UDim2.fromOffset(160, 30), Position = UDim2.new(1, -150, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5), Color = mode == "Sell" and C.Gold or Color3.fromRGB(255, 160, 80), MaxText = 20 })
-				if mode ~= "View" then
+				UITheme.Label(r, { Text = ore.Name .. "  x" .. Format.Commas(count), Title = true, Size = UDim2.fromOffset(260, 26), Position = UDim2.fromOffset(62, 6), XAlign = Enum.TextXAlignment.Left, Color = ore.Color, MaxText = 22 })
+				local eff = Config.Effects[ore.Effect]
+				UITheme.Label(r, { Text = Config.Rarity[ore.Rarity].Label .. "  -  forges " .. Config.EffectText(ore.Effect, ore.Points), Size = UDim2.new(1, -250, 0, 22), Position = UDim2.fromOffset(62, 34), XAlign = Enum.TextXAlignment.Left, Color = eff and eff.Color or C.Sub, MaxText = 15 })
+				if mode == "Sell" then
+					UITheme.Label(r, { Text = "+" .. Format.Abbrev(ore.Sell * count * d.Derived.CoinMult), Size = UDim2.fromOffset(90, 30), Position = UDim2.new(1, -130, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5), Color = C.Gold, MaxText = 20 })
 					UITheme.Button(r, {
-						Text = mode == "Sell" and "Sell" or "Forge",
-						Color = mode == "Sell" and "Gold" or "Red",
+						Text = "Sell",
+						Color = "Gold",
 						Size = UDim2.fromOffset(110, 46),
 						Position = UDim2.new(1, -10, 0.5, 0),
 						AnchorPoint = Vector2.new(1, 0.5),
 						OnClick = function()
-							request(mode == "Sell" and "Sell" or "Forge", ore.Id)
+							request("Sell", ore.Id)
 						end,
 					})
 				end
@@ -593,26 +631,25 @@ local function buildBackpack()
 		end
 		if not any then
 			local r = rowFrame(items, 60, 1)
-			UITheme.Label(r, { Text = "Your backpack is empty. Slay monsters in the Dungeon to loot ore!", Size = UDim2.new(1, -20, 1, -10), Position = UDim2.fromOffset(10, 5), Color = C.Sub, MaxText = 18 })
+			UITheme.Label(r, { Text = "Your bag is empty. Fight down the Path and press F on dropped ore to pick it up!", Size = UDim2.new(1, -20, 1, -10), Position = UDim2.fromOffset(10, 5), Color = C.Sub, MaxText = 17 })
 		end
 		capFill.Size = UDim2.fromScale(math.clamp(d.BackpackCount / math.max(1, d.BackpackMax), 0, 1), 1)
-		capText.Text = Format.Abbrev(d.BackpackCount) .. " / " .. Format.Abbrev(d.BackpackMax)
-		actionBtn.Visible = mode ~= "View"
-		UITheme.SetButtonText(actionBtn, mode == "Sell" and "SELL ALL" or "FORGE ALL")
-		hint.Text = mode == "Sell" and "Tip: keep rare ore for the Forge!" or (mode == "Forge" and "Every ore forged = +Blade levels" or "Forge at the cauldron, sell at the stall.")
+		capText.Text = Format.Abbrev(d.BackpackCount) .. " / " .. Format.Abbrev(d.BackpackMax) .. " ores"
+		actionBtn.Visible = mode == "Sell"
+		hint.Text = mode == "Sell" and "Keep rare ore for the Soul Forge - every ore stamps an effect on your weapon!" or "Forge ore into weapons at the Soul Forge, sell it at the stall. Upgrade the bag for more slots."
 	end
 end
 
 local function buildIndex()
-	local p = makePanel("Index", "ORE INDEX", Vector2.new(680, 470), Color3.fromRGB(80, 200, 255))
-	local grid = scroller(p.Body, { Size = UDim2.new(1, 0, 1, -40) })
+	local p = makePanel("Index", "ORE INDEX", Vector2.new(720, 500), C.Cyan)
+	local grid = scroller(p.Body, { Size = UDim2.new(1, 0, 1, -34) })
 	local g = Instance.new("UIGridLayout")
-	g.CellSize = UDim2.fromOffset(148, 170)
-	g.CellPadding = UDim2.fromOffset(10, 10)
+	g.CellSize = UDim2.fromOffset(160, 178)
+	g.CellPadding = UDim2.fromOffset(8, 8)
 	g.SortOrder = Enum.SortOrder.LayoutOrder
 	g.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	g.Parent = grid
-	local footer = UITheme.Label(p.Body, { Text = "", Size = UDim2.new(1, 0, 0, 30), Position = UDim2.new(0, 0, 1, 0), AnchorPoint = Vector2.new(0, 1), Color = C.Gold, MaxText = 20 })
+	local footer = UITheme.Label(p.Body, { Text = "", Size = UDim2.new(1, 0, 0, 28), Position = UDim2.new(0, 0, 1, 0), AnchorPoint = Vector2.new(0, 1), Color = C.Gold, MaxText = 18 })
 	p.Refresh = function(d)
 		local sigParts = {}
 		for _, ore in ipairs(Config.Ores) do
@@ -630,22 +667,24 @@ local function buildIndex()
 			if known then
 				found += 1
 			end
-			local card = frame(grid, { Color = known and Color3.fromRGB(40, 32, 66) or Color3.fromRGB(22, 20, 30), Order = i, Corner = 14, Stroke = 3 })
-			local st = card:FindFirstChildOfClass("UIStroke")
-			if st and known then
-				st.Color = ore.Color
-			end
-			local gem = frame(card, { Color = known and ore.Color or Color3.fromRGB(50, 50, 60), Size = UDim2.fromOffset(54, 54), Position = UDim2.new(0.5, 0, 0, 40), AnchorPoint = Vector2.new(0.5, 0.5), Stroke = 2 })
+			local rarity = Config.Rarity[ore.Rarity]
+			local eff = Config.Effects[ore.Effect]
+			local card = frame(grid, { Color = known and C.Row or Color3.fromRGB(16, 14, 22), Order = i, Corner = 10 })
+			local st = UITheme.Stroke(card, known and 2 or 1, known and rarity.Color or C.Line, true)
+			st.Transparency = known and 0.1 or 0.5
+			local gem = frame(card, { Color = known and ore.Color or Color3.fromRGB(44, 42, 54), Size = UDim2.fromOffset(44, 44), Position = UDim2.new(0.5, 0, 0, 34), AnchorPoint = Vector2.new(0.5, 0.5), Stroke = 2 })
 			gem.Rotation = 45
 			if known then
 				local shine = frame(gem, { Color = Color3.new(1, 1, 1), Transparency = 0.5, Size = UDim2.fromScale(0.35, 0.35), Position = UDim2.fromScale(0.15, 0.15) })
 				shine.Name = "Shine"
 			end
-			UITheme.Label(card, { Text = known and ore.Name or "???", Title = true, Size = UDim2.new(1, -10, 0, 26), Position = UDim2.fromOffset(5, 78), Color = known and ore.Color or C.Sub, MaxText = 20 })
-			UITheme.Label(card, { Text = Config.Rarity[ore.Rarity].Label, Size = UDim2.new(1, -10, 0, 20), Position = UDim2.fromOffset(5, 104), Color = C.Sub, MaxText = 15 })
-			UITheme.Label(card, { Text = known and ("Forge +" .. ore.Forge .. " | Sell " .. ore.Sell) or ("Reward: " .. Format.Abbrev(Config.IndexReward[ore.Rarity]) .. " Coins"), Size = UDim2.new(1, -10, 0, 34), Position = UDim2.fromOffset(5, 128), Color = known and C.Text or C.Gold, MaxText = 14 })
+			UITheme.Label(card, { Text = known and ore.Name or "???", Title = true, Size = UDim2.new(1, -10, 0, 24), Position = UDim2.fromOffset(5, 64), Color = known and ore.Color or C.Sub, MaxText = 19 })
+			UITheme.Label(card, { Text = rarity.Label, Size = UDim2.new(1, -10, 0, 18), Position = UDim2.fromOffset(5, 88), Color = rarity.Color, MaxText = 14 })
+			local body = known and Config.EffectText(ore.Effect, ore.Points) or ("Effect: " .. (eff and eff.Name or "?") .. "\nFind it for " .. Format.Abbrev(Config.IndexReward[ore.Rarity]) .. " Coins")
+			local t = UITheme.Label(card, { Text = body, Size = UDim2.new(1, -12, 0, 62), Position = UDim2.fromOffset(6, 108), Color = known and (eff and eff.Color or C.Text) or C.Sub, MaxText = 13, StrokeThickness = 1 })
+			t.TextWrapped = true
 		end
-		footer.Text = string.format("Discovered %d / %d ores  -  new discoveries pay Coins!", found, #Config.Ores)
+		footer.Text = string.format("Discovered %d / %d ores  -  every new ore pays Coins", found, #Config.Ores)
 	end
 end
 
@@ -737,68 +776,90 @@ local function buildShop()
 end
 
 local function buildTeleport()
-	local p = makePanel("Teleport", "TELEPORT", Vector2.new(640, 470), Color3.fromRGB(80, 220, 255))
-	UITheme.Label(p.Body, { Text = "Hub is free. Everything else needs the Fast Travel pass (or walk through the portals!).", Size = UDim2.new(1, 0, 0, 28), Color = C.Sub, MaxText = 16 })
-	local grid = scroller(p.Body, { Size = UDim2.new(1, 0, 1, -36), Position = UDim2.fromOffset(0, 36) })
+	local p = makePanel("Teleport", "TRAVEL", Vector2.new(680, 490), C.Cyan)
+	UITheme.Label(p.Body, { Text = "Spawn, Training and Boss Rush are free. Jumping to a stage needs Fast Travel - or just walk the Path!", Size = UDim2.new(1, 0, 0, 26), Color = C.Sub, MaxText = 15 })
+	local grid = scroller(p.Body, { Size = UDim2.new(1, 0, 1, -34), Position = UDim2.fromOffset(0, 34) })
 	local g = Instance.new("UIGridLayout")
-	g.CellSize = UDim2.fromOffset(190, 64)
-	g.CellPadding = UDim2.fromOffset(10, 10)
+	g.CellSize = UDim2.fromOffset(200, 58)
+	g.CellPadding = UDim2.fromOffset(8, 8)
 	g.SortOrder = Enum.SortOrder.LayoutOrder
 	g.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	g.Parent = grid
 	p.Refresh = function(d)
-		local unlockedCount = 0
-		for _, stage in ipairs(Config.Stages) do
-			local zone = Config.Zones[stage.Zone]
-			if d.Power >= stage.PowerReq and d.Blade >= (zone.BladeReq or 0) then
-				unlockedCount += 1
-			end
-		end
-		if p.Sig == unlockedCount then
+		local sig = tostring(d.Stage)
+		if p.Sig == sig then
 			return
 		end
-		p.Sig = unlockedCount
+		p.Sig = sig
 		clearList(grid)
 		local function add(order, text, dest, color, locked)
-			UITheme.Button(grid, { Text = locked and (text .. " [LOCKED]") or text, Color = locked and "Red" or color, Order = order, MaxText = 20, Sound = "Teleport", OnClick = function()
+			UITheme.Button(grid, { Text = locked and ("LOCKED  " .. text) or text, Color = locked and "Red" or color, Order = order, MaxText = 19, Sound = "Teleport", OnClick = function()
 				request("Teleport", dest)
 				UI.Close()
 			end })
 		end
-		add(1, "Hub", "Hub", "Green")
-		add(2, "Train Area", "Train", "Blue")
-		add(3, "Tower", "Tower", "Purple")
+		add(1, "Spawn", "Hub", "Green")
+		add(2, "Training", "Train", "Blue")
+		add(3, "Boss Rush", "Tower", "Purple")
 		for i, stage in ipairs(Config.Stages) do
-			local zone = Config.Zones[stage.Zone]
-			local unlocked = d.Power >= stage.PowerReq and d.Blade >= (zone.BladeReq or 0)
-			add(10 + i, "Stage " .. i .. (stage.Boss and " (Boss)" or ""), "Stage_" .. i, "Gold", not unlocked)
+			local unlocked = d.Stage >= i - 1
+			local label = (stage.Boss and "BOSS " or "Stage ") .. i
+			if unlocked and i > d.Stage then
+				label ..= "  (current)"
+			end
+			add(10 + i, label, "Stage_" .. i, stage.Boss and "Gold" or "Blue", not unlocked)
 		end
 	end
 end
 
 local function buildRebirth()
-	local p = makePanel("Rebirth", "REBIRTH", Vector2.new(600, 440), C.Gold)
-	local info = rowFrame(p.Body, 250, 0, Color3.fromRGB(44, 34, 30))
-	local count = UITheme.Label(info, { Text = "", Title = true, Size = UDim2.new(1, -20, 0, 44), Position = UDim2.fromOffset(10, 8), Color = C.Gold, MaxText = 36 })
-	local barBg = frame(info, { Color = Color3.fromRGB(20, 16, 30), Size = UDim2.new(1, -40, 0, 34), Position = UDim2.fromOffset(20, 60), Corner = 17, Stroke = 2 })
-	local barFill = frame(barBg, { Color = C.Gold, Size = UDim2.fromScale(0, 1), Corner = 17 })
-	UITheme.Gradient(barFill, Color3.new(1, 1, 1), Color3.fromRGB(220, 140, 40), 90)
-	local barText = UITheme.Label(barBg, { Text = "", Size = UDim2.fromScale(1, 1), ZIndex = 3, MaxText = 20 })
-	local rewards = UITheme.Label(info, { Text = "", Rich = true, Size = UDim2.new(1, -30, 0, 140), Position = UDim2.fromOffset(15, 102), XAlign = Enum.TextXAlignment.Left, MaxText = 18 })
-	rewards.TextWrapped = true
-	UITheme.Button(p.Body, { Text = "REBIRTH", Color = "Gold", Size = UDim2.fromOffset(260, 70), Position = UDim2.new(0.5, 0, 1, -4), AnchorPoint = Vector2.new(0.5, 1), MaxText = 32, OnClick = function()
+	local p = makePanel("Rebirth", "REBIRTH & ASCEND", Vector2.new(660, 520), C.Gold)
+	local function card(order: number, color: Color3, y: number)
+		local r = rowFrame(p.Body, 222, order)
+		r.Position = UDim2.fromOffset(0, y)
+		accentBar(r, color)
+		local title = UITheme.Label(r, { Text = "", Title = true, Size = UDim2.new(1, -250, 0, 38), Position = UDim2.fromOffset(20, 8), XAlign = Enum.TextXAlignment.Left, Color = color, MaxText = 32 })
+		local barBg = frame(r, { Color = Color3.fromRGB(12, 10, 20), Size = UDim2.new(1, -250, 0, 28), Position = UDim2.fromOffset(20, 52), Corner = 8, Stroke = 2 })
+		local fill = frame(barBg, { Color = color, Size = UDim2.fromScale(0, 1), Corner = 8 })
+		UITheme.Gradient(fill, Color3.new(1, 1, 1), color:Lerp(Color3.new(0, 0, 0), 0.35), 90)
+		local barText = UITheme.Label(barBg, { Text = "", Size = UDim2.fromScale(1, 1), ZIndex = 3, MaxText = 17 })
+		local info = UITheme.Label(r, { Text = "", Rich = true, Size = UDim2.new(1, -250, 0, 120), Position = UDim2.fromOffset(20, 90), XAlign = Enum.TextXAlignment.Left, MaxText = 16 })
+		info.TextWrapped = true
+		info.TextYAlignment = Enum.TextYAlignment.Top
+		return r, title, fill, barText, info
+	end
+	local reb, rebTitle, rebFill, rebBar, rebInfo = card(1, C.Gold, 0)
+	local rebBtn = UITheme.Button(reb, { Text = "REBIRTH", Color = "Gold", Size = UDim2.fromOffset(200, 72), Position = UDim2.new(1, -16, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5), MaxText = 30, OnClick = function()
 		request("Rebirth")
-		UI.Close()
+	end })
+	local asc, ascTitle, ascFill, ascBar, ascInfo = card(2, C.Pink, 234)
+	local ascBtn = UITheme.Button(asc, { Text = "ASCEND", Color = "Purple", Size = UDim2.fromOffset(200, 72), Position = UDim2.new(1, -16, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5), MaxText = 30, OnClick = function()
+		request("Ascend")
 	end })
 	p.Refresh = function(d)
-		count.Text = "Rebirths: " .. Format.Abbrev(d.Rebirths)
-		barFill.Size = UDim2.fromScale(math.clamp(d.Power / math.max(1, d.RebirthReq), 0, 1), 1)
-		barText.Text = Format.Abbrev(d.Power) .. " / " .. Format.Abbrev(d.RebirthReq) .. " Power"
-		rewards.Text = table.concat({
-			'<font color="#78ff9c">+100% Power gain</font>, <font color="#ffd75a">+25% Coins</font>, <font color="#ff8a8a">+10% Damage</font> (permanent)',
-			'<font color="#c8a0ff">+1 Race Reroll</font> and a stronger Ascension aura',
-			'<font color="#ff7a7a">Resets Power and Coins.</font> Keeps Blade level, ore, race and runes.',
-		}, "\n")
+		local R, A = Config.Rebirth, Config.Ascension
+		local powerNow = R.PowerMult ^ d.Rebirths * A.PowerMult ^ d.Ascensions
+		local coinsNow = R.CoinMult ^ d.Rebirths * A.CoinMult ^ d.Ascensions
+		rebTitle.Text = "REBIRTH  #" .. Format.Abbrev(d.Rebirths + 1)
+		local rp = math.clamp(d.Power / math.max(1, d.RebirthReq), 0, 1)
+		rebFill.Size = UDim2.fromScale(rp, 1)
+		rebBar.Text = Format.Abbrev(d.Power) .. " / " .. Format.Abbrev(d.RebirthReq) .. " Power"
+		rebInfo.Text = string.format(
+			'<font color="#78ff9c">Power x%s</font> (x%s -> x%s)\n<font color="#ffd75a">Coins x%s</font> (x%s -> x%s)\n+%d Race Reroll\n<font color="#ff7a7a">Resets Power and Coins.</font>',
+			tostring(R.PowerMult), Format.Abbrev(powerNow), Format.Abbrev(powerNow * R.PowerMult),
+			tostring(R.CoinMult), Format.Abbrev(coinsNow), Format.Abbrev(coinsNow * R.CoinMult),
+			R.RerollReward
+		)
+		UITheme.SetButtonText(rebBtn, rp >= 1 and "REBIRTH!" or (math.floor(rp * 100) .. "%"))
+		ascTitle.Text = "ASCENSION  " .. (d.Ascensions > 0 and ("#" .. (d.Ascensions + 1)) or "I")
+		local ap = math.clamp(d.Rebirths / math.max(1, d.AscendReq), 0, 1)
+		ascFill.Size = UDim2.fromScale(ap, 1)
+		ascBar.Text = d.Rebirths .. " / " .. d.AscendReq .. " Rebirths"
+		ascInfo.Text = string.format(
+			'<font color="#78ff9c">Power x%s</font>  <font color="#ffd75a">Coins x%s</font> (forever)\n+%d Rerolls, +1 %s\nUnlocks higher Training pads\n<font color="#ff7a7a">Resets Rebirths, Power and Coins.</font>',
+			tostring(A.PowerMult), tostring(A.CoinMult), A.Rerolls, Config.KeyNames[A.Catalyst] or "Catalyst"
+		)
+		UITheme.SetButtonText(ascBtn, ap >= 1 and "ASCEND!" or (math.floor(ap * 100) .. "%"))
 	end
 end
 
@@ -906,7 +967,7 @@ function UI.SetPad(mult: number?, locked: boolean?)
 		return
 	end
 	padLabel.Visible = true
-	padLabel.Text = locked and ("x" .. Format.Abbrev(mult) .. "  PAD LOCKED") or ("x" .. Format.Abbrev(mult) .. "  TRAINING")
+	padLabel.Text = locked and ("x" .. Format.Abbrev(mult) .. "  LOCKED - REBIRTH / ASCEND TO USE") or ("x" .. Format.Abbrev(mult) .. "  TRAINING")
 	padLabel.TextColor3 = locked and C.Red or C.Green
 end
 
@@ -938,16 +999,86 @@ function UI.Banner(title: string, sub: string?, color: Color3?)
 	end)
 end
 
-function UI.Tower(state: string?, floor: number?, endsAt: number?)
+function UI.Tower(state: string?, wave: number?, endsAt: number?)
 	if not state then
 		towerHud.Visible = false
 		return
 	end
 	towerHud.Visible = true
 	towerHud:SetAttribute("EndsAt", endsAt or 0)
-	towerHud:SetAttribute("Floor", floor or 1)
+	towerHud:SetAttribute("Floor", wave or 1)
 	local title = towerHud:FindFirstChild("Title") :: TextLabel
-	title.Text = "TOWER FLOOR " .. tostring(floor or 1)
+	title.Text = "BOSS RUSH  -  WAVE " .. tostring(wave or 1)
+end
+
+-- Which Path stage a world position is in (nil when off the Path).
+local function stageAt(pos: Vector3): number?
+	local W = Config.World
+	if pos.Z > W.PathStartZ or math.abs(pos.X) > W.PathWidth / 2 + 6 then
+		return nil
+	end
+	for i in ipairs(Config.Stages) do
+		local zStart, zEnd = Config.StageBounds(i)
+		if pos.Z <= zStart and pos.Z > zEnd then
+			return i
+		end
+	end
+	return nil
+end
+UI.StageAt = stageAt
+
+local function refreshStageHud(d)
+	local char = player.Character
+	local rootPart = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local i = rootPart and stageAt(rootPart.Position)
+	if not i or not d or towerHud.Visible then
+		stageHud.Visible = false
+		return
+	end
+	stageHud.Visible = true
+	local stage = Config.Stages[i]
+	local zone = Config.Zones[stage.Zone]
+	local title = stageHud:FindFirstChild("Title") :: TextLabel
+	local count = stageHud:FindFirstChild("Count") :: TextLabel
+	local fill = (stageHud:FindFirstChild("Bar") :: Frame):FindFirstChild("Fill") :: Frame
+	title.Text = (stage.Boss and "BOSS STAGE " or "STAGE ") .. i .. "  " .. zone.Name:upper()
+	title.TextColor3 = stage.Boss and C.Red or zone.Accent
+	if i <= d.Stage then
+		count.Text = "CLEARED"
+		count.TextColor3 = C.Green
+		fill.Size = UDim2.fromScale(1, 1)
+		fill.BackgroundColor3 = C.Green
+	else
+		local need = stage.Kills
+		local kills = math.min(d.StageKills or 0, need)
+		count.Text = stage.Boss and (kills >= need and "DEFEATED" or "SLAY THE BOSS") or (kills .. " / " .. need .. " KOs")
+		count.TextColor3 = C.Gold
+		fill.Size = UDim2.fromScale(math.clamp(kills / math.max(1, need), 0, 1), 1)
+		fill.BackgroundColor3 = stage.Boss and C.Red or zone.Accent
+	end
+end
+
+local eventSig = ""
+local function refreshEvents(d)
+	local keys = {}
+	for key in pairs(d.Events or {}) do
+		table.insert(keys, key)
+	end
+	table.sort(keys)
+	local sig = table.concat(keys, ",")
+	if sig == eventSig then
+		return
+	end
+	eventSig = sig
+	clearList(eventRow)
+	for i, key in ipairs(keys) do
+		local e = Config.Events[key]
+		if e then
+			local chip = frame(eventRow, { Name = key, Color = e.Color, Transparency = 0.1, Size = UDim2.fromOffset(150, 24), Order = i, Corner = 6, Stroke = 1.5 })
+			UITheme.Gradient(chip, Color3.new(1, 1, 1), Color3.fromRGB(170, 170, 170), 90)
+			softLabel(chip, { Name = "Label", Text = e.Name, Font = Config.Fonts.Display, Size = UDim2.new(1, -10, 1, -4), Position = UDim2.fromOffset(5, 2), MaxText = 17 })
+		end
+	end
 end
 
 ---------------------------------------------------------------------
@@ -960,22 +1091,25 @@ function UI.Update(d)
 	animateNumber("Power", pills.Power.Value, d.Power, Format.Abbrev)
 	pills.Power.Sub.Text = "+" .. Format.Abbrev(d.Derived.PowerPerSwing) .. " / swing"
 	animateNumber("Blade", pills.Blade.Value, d.Blade, function(v)
-		return "+" .. Format.Abbrev(math.floor(v))
+		return "Forge +" .. Format.Abbrev(math.floor(v))
 	end)
 	pills.Blade.Sub.Text = tier.Name
 	pills.Blade.Sub.TextColor3 = tier.Edge or C.Sub
 	animateNumber("Coins", pills.Coins.Value, d.Coins, Format.Abbrev)
-	pills.Coins.Sub.Text = "x" .. string.format("%.2f", d.Derived.CoinMult)
-	pills.Backpack.Value.Text = Format.Abbrev(d.BackpackCount) .. "/" .. Format.Abbrev(d.BackpackMax)
+	pills.Coins.Sub.Text = "x" .. Format.Abbrev(d.Derived.CoinMult) .. " coins"
+	pills.Backpack.Value.Text = Format.Abbrev(d.BackpackCount) .. " / " .. Format.Abbrev(d.BackpackMax)
 	local full = d.BackpackCount >= d.BackpackMax
-	pills.Backpack.Sub.Text = full and "FULL" or "Ore"
+	pills.Backpack.Sub.Text = full and "BAG FULL - SELL!" or "ore bag"
 	pills.Backpack.Sub.TextColor3 = full and C.Red or pills.Backpack.Color
-	pills.Rebirths.Value.Text = Format.Abbrev(d.Rebirths)
-	pills.Rebirths.Sub.Text = math.floor(math.clamp(d.Power / math.max(1, d.RebirthReq), 0, 1) * 100) .. "% to next"
-	pills.Damage.Value.Text = Format.Abbrev(d.Derived.Damage)
+	pills.Rebirths.Value.Text = (d.Ascensions > 0 and ("A" .. d.Ascensions .. "  ") or "") .. Format.Abbrev(d.Rebirths) .. " Reb"
+	local rp = math.floor(math.clamp(d.Power / math.max(1, d.RebirthReq), 0, 1) * 100)
+	pills.Rebirths.Sub.Text = rp >= 100 and "REBIRTH READY!" or (rp .. "% to rebirth")
+	pills.Rebirths.Sub.TextColor3 = rp >= 100 and C.Gold or pills.Rebirths.Color
+	pills.Damage.Value.Text = Format.Abbrev(d.Derived.Damage) .. " DMG"
 	pills.Damage.Sub.Text = "Runes: " .. d.Runes
+	adminButton.Visible = d.IsAdmin == true
 
-	-- contextual: only the resources that changed fade in
+	-- contextual: the unpinned resources that changed fade in
 	local now = { Power = d.Power, Blade = d.Blade, Coins = d.Coins, Backpack = d.BackpackCount, Rebirths = d.Rebirths, Damage = d.Derived.Damage }
 	for key, v in pairs(now) do
 		if not first and prevValues[key] ~= nil and prevValues[key] ~= v then
@@ -983,9 +1117,7 @@ function UI.Update(d)
 		end
 		prevValues[key] = v
 	end
-	if full then
-		UI.Reveal("Backpack", 1)
-	end
+	refreshEvents(d)
 
 	if current and current.Refresh then
 		current.Refresh(d)
@@ -996,6 +1128,7 @@ function UI.Update(d)
 end
 
 -- Called every frame by the client (timers + contextual fades).
+local stageTick = 0
 function UI.Tick(dt: number)
 	local now = workspace:GetServerTimeNow()
 	if towerHud.Visible then
@@ -1009,10 +1142,24 @@ function UI.Tick(dt: number)
 			timer.Text = "--:--"
 		end
 	end
+	stageTick += dt
+	if stageTick > 0.2 then
+		stageTick = 0
+		refreshStageHud(UI.Data)
+		local events = UI.Data and UI.Data.Events or {}
+		for _, chip in ipairs(eventRow:GetChildren()) do
+			local e = events[chip.Name]
+			local label = chip:FindFirstChild("Label") :: TextLabel?
+			if e and label then
+				label.Text = Config.Events[chip.Name].Name .. "  " .. Format.Time(math.max(0, e.EndsAt - now))
+			end
+		end
+	end
+	local menuOpen = drawerOpen or current ~= nil
+	menuHint.Visible = not menuOpen
 	local t = os.clock()
-	local peek = drawerOpen or current ~= nil
 	for _, p in pairs(pills) do
-		local target = (peek or t < p.Until) and 1 or 0
+		local target = (p.Pinned or menuOpen or t < p.Until) and 1 or 0
 		local speed = target > p.Alpha and 9 or 3
 		p.Alpha += (target - p.Alpha) * math.min(1, dt * speed)
 		if math.abs(target - p.Alpha) < 0.01 then
@@ -1041,9 +1188,9 @@ function UI.ToggleDrawer(force: boolean?)
 	SFX.Play(open and "UIOpen" or "UIClose")
 	if open then
 		drawer.Visible = true
-		drawer.Position = UDim2.new(0, -10, 0, drawer.Position.Y.Offset)
+		drawer.Position = UDim2.new(0, DRAWER_X - 28, 0, drawer.Position.Y.Offset)
 	end
-	tween(drawer, 0.28, { GroupTransparency = open and 0 or 1, Position = UDim2.new(0, open and 18 or -10, 0, drawer.Position.Y.Offset) }, Enum.EasingStyle.Quart).Completed:Once(function()
+	tween(drawer, 0.28, { GroupTransparency = open and 0 or 1, Position = UDim2.new(0, open and DRAWER_X or DRAWER_X - 28, 0, drawer.Position.Y.Offset) }, Enum.EasingStyle.Quart).Completed:Once(function()
 		if not drawerOpen then
 			drawer.Visible = false
 		end
@@ -1102,17 +1249,19 @@ function UI.Init(requestFn)
 		end
 	end)
 
-	-- resource ticker (top centre). Pills are invisible until a value
-	-- changes; hidden pills collapse so the visible ones stay centred.
-	local top = frame(root, { Transparency = 1, Size = UDim2.new(1, -320, 0, 40), Position = UDim2.new(0.5, 0, 0, inset.Y + 10), AnchorPoint = Vector2.new(0.5, 0) })
-	top.Name = "Resources"
-	list(top, 8, true)
-	makePill(top, "Power", "Icon_Power", Color3.fromRGB(120, 255, 170), 1)
-	makePill(top, "Blade", "Icon_Blade", Color3.fromRGB(255, 170, 80), 2)
-	makePill(top, "Damage", "Icon_Rune", Color3.fromRGB(255, 110, 120), 3)
-	makePill(top, "Coins", "Icon_Coins", C.Gold, 4)
-	makePill(top, "Backpack", "Icon_Backpack", Color3.fromRGB(120, 200, 255), 5)
-	makePill(top, "Rebirths", "Icon_Rebirth", Color3.fromRGB(210, 150, 255), 6)
+	-- simulator-style currency stack (left, vertically centred). Power, Coins,
+	-- the ore bag and Rebirths are always shown; Forge level and Damage fade
+	-- in when they change. Clicking a pill opens the matching menu.
+	local stack = frame(root, { Transparency = 1, Size = UDim2.fromOffset(176, 300), Position = UDim2.new(0, 16, 0.5, -10), AnchorPoint = Vector2.new(0, 0.5) })
+	stack.Name = "Resources"
+	local sl = list(stack, 6, false, Enum.HorizontalAlignment.Left)
+	sl.VerticalAlignment = Enum.VerticalAlignment.Center
+	makePill(stack, "Power", "Icon_Power", Color3.fromRGB(120, 255, 170), 1, true, nil)
+	makePill(stack, "Coins", "Icon_Coins", C.Gold, 2, true, "Upgrades")
+	makePill(stack, "Backpack", "Icon_Backpack", Color3.fromRGB(120, 200, 255), 3, true, "Backpack")
+	makePill(stack, "Rebirths", "Icon_Rebirth", Color3.fromRGB(210, 150, 255), 4, true, "Rebirth")
+	makePill(stack, "Blade", "Icon_Blade", Color3.fromRGB(255, 170, 80), 5, false, "Forge")
+	makePill(stack, "Damage", "Icon_Rune", Color3.fromRGB(255, 110, 120), 6, false, "Weapons")
 
 	-- single small menu button; everything else lives in the drawer
 	local menuBtn = Instance.new("TextButton")
@@ -1121,50 +1270,87 @@ function UI.Init(requestFn)
 	menuBtn.Text = ""
 	menuBtn.Size = UDim2.fromOffset(40, 40)
 	menuBtn.Position = UDim2.fromOffset(18, inset.Y + 10)
-	menuBtn.BackgroundColor3 = Color3.fromRGB(10, 8, 22)
-	menuBtn.BackgroundTransparency = 0.45
+	menuBtn.BackgroundColor3 = Color3.fromRGB(10, 8, 18)
+	menuBtn.BackgroundTransparency = 0.35
 	menuBtn.Parent = root
-	UITheme.Corner(menuBtn, 20)
+	UITheme.Corner(menuBtn, 10)
 	local mbStroke = Instance.new("UIStroke")
 	mbStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	mbStroke.Thickness = 1
-	mbStroke.Color = Color3.fromRGB(200, 180, 255)
-	mbStroke.Transparency = 0.6
+	mbStroke.Thickness = 1.5
+	mbStroke.Color = C.Cyan
+	mbStroke.Transparency = 0.55
 	mbStroke.Parent = menuBtn
 	for k = -1, 1 do
 		local line = frame(menuBtn, { Color = Color3.new(1, 1, 1), Transparency = 0.1, Size = UDim2.fromOffset(k == 0 and 12 or 16, 2), Position = UDim2.new(0.5, 0, 0.5, k * 5), AnchorPoint = Vector2.new(0.5, 0.5), Corner = 1 })
 		line.Name = "Line"
 	end
 	menuBtn.MouseEnter:Connect(function()
-		tween(mbStroke, 0.15, { Transparency = 0.1 })
+		tween(mbStroke, 0.15, { Transparency = 0.05 })
 		SFX.Play("UIHover")
 	end)
 	menuBtn.MouseLeave:Connect(function()
-		tween(mbStroke, 0.15, { Transparency = 0.6 })
+		tween(mbStroke, 0.15, { Transparency = 0.55 })
 	end)
 	menuBtn.Activated:Connect(function()
 		UI.ToggleDrawer()
 	end)
 
-	-- menu drawer (slides out under the menu button)
+	-- "G for menus" hint: small text on the left, hidden while a menu is open
+	menuHint = softLabel(root, { Name = "MenuHint", Text = "G for menus", Font = Config.Fonts.Body, Size = UDim2.fromOffset(110, 16), Position = UDim2.fromOffset(66, inset.Y + 22), XAlign = Enum.TextXAlignment.Left, Color = C.Sub, MaxText = 15 })
+
+	-- HOME: top centre, always one click back to spawn (also leaves the Boss Rush)
+	local homeBtn = UITheme.Button(root, {
+		Name = "Home",
+		Text = "HOME",
+		Color = "Blue",
+		Size = UDim2.fromOffset(112, 38),
+		Position = UDim2.new(0.5, 0, 0, inset.Y + 8),
+		AnchorPoint = Vector2.new(0.5, 0),
+		MaxText = 22,
+		Corner = 8,
+		Sound = "Teleport",
+		OnClick = function()
+			request("Teleport", "Hub")
+		end,
+	})
+	homeBtn.ZIndex = 2
+
+	-- stage tracker (under HOME, only while standing on the Path)
+	stageHud = frame(root, { Color = Color3.fromRGB(10, 8, 18), Transparency = 0.3, Size = UDim2.fromOffset(330, 50), Position = UDim2.new(0.5, 0, 0, inset.Y + 54), AnchorPoint = Vector2.new(0.5, 0), Corner = 8 })
+	stageHud.Name = "StageTracker"
+	stageHud.Visible = false
+	local shStroke = UITheme.Stroke(stageHud, 1, C.Line, true)
+	shStroke.Transparency = 0.3
+	softLabel(stageHud, { Name = "Title", Text = "", Font = Config.Fonts.Display, Size = UDim2.new(1, -20, 0, 22), Position = UDim2.fromOffset(10, 4), XAlign = Enum.TextXAlignment.Left, MaxText = 22 })
+	softLabel(stageHud, { Name = "Count", Text = "", Font = Config.Fonts.Heading, Size = UDim2.new(0.4, 0, 0, 20), Position = UDim2.new(1, -10, 0, 5), AnchorPoint = Vector2.new(1, 0), XAlign = Enum.TextXAlignment.Right, MaxText = 18, Color = C.Gold })
+	local shBar = frame(stageHud, { Name = "Bar", Color = Color3.fromRGB(30, 26, 44), Size = UDim2.new(1, -20, 0, 10), Position = UDim2.fromOffset(10, 32), Corner = 4 })
+	local shFill = frame(shBar, { Name = "Fill", Color = C.Green, Size = UDim2.fromScale(0, 1), Corner = 4 })
+	UITheme.Gradient(shFill, Color3.new(1, 1, 1), Color3.fromRGB(170, 170, 170), 90)
+
+	-- global event chips (admin abuse events), top right of HOME
+	eventRow = frame(root, { Transparency = 1, Size = UDim2.fromOffset(420, 26), Position = UDim2.new(0.5, 70, 0, inset.Y + 14), AnchorPoint = Vector2.new(0, 0) })
+	eventRow.Name = "Events"
+	list(eventRow, 6, true, Enum.HorizontalAlignment.Left)
+
+	-- menu drawer (slides out next to the menu button)
 	drawer = Instance.new("CanvasGroup")
 	drawer.Name = "Drawer"
-	drawer.BackgroundColor3 = Color3.fromRGB(8, 6, 18)
-	drawer.BackgroundTransparency = 0.3
+	drawer.BackgroundColor3 = Color3.fromRGB(8, 6, 14)
+	drawer.BackgroundTransparency = 0.2
 	drawer.GroupTransparency = 1
 	drawer.Visible = false
-	drawer.Size = UDim2.fromOffset(188, 440)
-	drawer.Position = UDim2.new(0, -10, 0, inset.Y + 60)
+	drawer.Size = UDim2.fromOffset(188, 482)
+	drawer.Position = UDim2.new(0, DRAWER_X - 28, 0, inset.Y + 60)
 	drawer.ZIndex = 3
 	drawer.Parent = root
-	UITheme.Corner(drawer, 16)
+	UITheme.Corner(drawer, 12)
 	local dStroke = Instance.new("UIStroke")
 	dStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	dStroke.Thickness = 1
-	dStroke.Color = Color3.fromRGB(200, 180, 255)
-	dStroke.Transparency = 0.7
+	dStroke.Thickness = 1.5
+	dStroke.Color = C.Cyan
+	dStroke.Transparency = 0.6
 	dStroke.Parent = drawer
-	softLabel(drawer, { Text = "MENU  [G]     MAP  [M]", Font = Enum.Font.BuilderSansMedium, Size = UDim2.new(1, -20, 0, 14), Position = UDim2.fromOffset(10, 10), Color = C.Sub, Transparency = 0.2 })
+	softLabel(drawer, { Text = "MENU [G]   MAP [M]   HOME [B]", Font = Config.Fonts.Body, Size = UDim2.new(1, -20, 0, 14), Position = UDim2.fromOffset(10, 10), Color = C.Sub, Transparency = 0.2 })
 	local grid = frame(drawer, { Transparency = 1, Size = UDim2.new(1, -16, 1, -36), Position = UDim2.fromOffset(8, 30) })
 	grid.Name = "Grid"
 	local gl = Instance.new("UIGridLayout")
@@ -1177,27 +1363,29 @@ function UI.Init(requestFn)
 		b.Name = label
 		b.AutoButtonColor = false
 		b.Text = ""
-		b.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		b.BackgroundTransparency = 0.94
+		b.BackgroundColor3 = color
+		b.BackgroundTransparency = 0.9
 		b.LayoutOrder = order
 		b.Parent = grid
-		UITheme.Corner(b, 10)
+		UITheme.Corner(b, 8)
 		local st = Instance.new("UIStroke")
 		st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		st.Thickness = 1
 		st.Color = color
-		st.Transparency = 0.75
+		st.Transparency = 0.6
 		st.Parent = b
+		local tick = frame(b, { Color = color, Size = UDim2.new(0, 3, 0, 16), Position = UDim2.fromOffset(4, 6), Corner = 1 })
+		tick.Name = "Tick"
 		UITheme.Icon(b, icon, UDim2.fromOffset(20, 20), UDim2.new(0.5, 0, 0, 5), Vector2.new(0.5, 0))
-		softLabel(b, { Text = label, Font = Enum.Font.BuilderSansMedium, Size = UDim2.new(1, -8, 0, 13), Position = UDim2.new(0, 4, 1, -18), Color = Color3.new(1, 1, 1) })
+		softLabel(b, { Text = label, Font = Config.Fonts.Heading, Size = UDim2.new(1, -8, 0, 14), Position = UDim2.new(0, 4, 1, -19), Color = Color3.new(1, 1, 1) })
 		b.MouseEnter:Connect(function()
-			tween(st, 0.12, { Transparency = 0.2 })
-			tween(b, 0.12, { BackgroundTransparency = 0.86 })
+			tween(st, 0.12, { Transparency = 0.1 })
+			tween(b, 0.12, { BackgroundTransparency = 0.75 })
 			SFX.Play("UIHover")
 		end)
 		b.MouseLeave:Connect(function()
-			tween(st, 0.12, { Transparency = 0.75 })
-			tween(b, 0.12, { BackgroundTransparency = 0.94 })
+			tween(st, 0.12, { Transparency = 0.6 })
+			tween(b, 0.12, { BackgroundTransparency = 0.9 })
 		end)
 		b.Activated:Connect(function()
 			SFX.Play("UIClick")
@@ -1207,26 +1395,25 @@ function UI.Init(requestFn)
 		return b
 	end
 	drawerButton("Weapons", "Icon_Blade", C.Purple, 1, function() UI.Toggle("Weapons") end)
-	drawerButton("Map", "Icon_Teleport", Color3.fromRGB(80, 220, 255), 2, function()
+	drawerButton("Forge", "Icon_Blade", Color3.fromRGB(255, 140, 60), 2, function() UI.Toggle("Forge") end)
+	drawerButton("Armor", "Icon_Rune", C.Cyan, 3, function() UI.Toggle("Armor") end)
+	drawerButton("Map", "Icon_Teleport", C.Cyan, 4, function()
 		if UI.ToggleMap then
 			UI.ToggleMap()
 		end
 	end)
-	drawerButton("Shop", "Icon_Shop", C.Green, 3, function() UI.Toggle("Shop") end)
-	drawerButton("Upgrades", "Icon_Upgrades", C.Blue, 4, function() UI.Toggle("Upgrades") end)
-	drawerButton("Race", "Icon_Race", C.Purple, 5, function() UI.Toggle("Race") end)
-	drawerButton("Bag", "Icon_Backpack", C.Gold, 6, function() UI.Toggle("Backpack", "View") end)
-	drawerButton("Chests", "Icon_Gem", C.Gold, 7, function() UI.Toggle("Chests") end)
-	drawerButton("Power", "Icon_Power", C.Red, 8, function() UI.Toggle("Power") end)
-	drawerButton("Rewards", "Icon_Tower", C.Green, 9, function() UI.Toggle("Rewards") end)
-	drawerButton("Index", "Icon_Index", C.Blue, 10, function() UI.Toggle("Index") end)
-	drawerButton("Travel", "Icon_Teleport", C.Green, 11, function() UI.Toggle("Teleport") end)
-	drawerButton("Hub", "Icon_Home", C.Blue, 12, function()
-		SFX.Play("Teleport")
-		request("Teleport", "Hub")
-	end)
-	drawerButton("Rebirth", "Icon_Rebirth", C.Gold, 13, function() UI.Toggle("Rebirth") end)
+	drawerButton("Bag", "Icon_Backpack", C.Gold, 5, function() UI.Toggle("Backpack", "View") end)
+	drawerButton("Upgrades", "Icon_Upgrades", C.Blue, 6, function() UI.Toggle("Upgrades") end)
+	drawerButton("Rebirth", "Icon_Rebirth", C.Gold, 7, function() UI.Toggle("Rebirth") end)
+	drawerButton("Race", "Icon_Race", C.Purple, 8, function() UI.Toggle("Race") end)
+	drawerButton("Index", "Icon_Index", C.Blue, 9, function() UI.Toggle("Index") end)
+	drawerButton("Travel", "Icon_Teleport", C.Green, 10, function() UI.Toggle("Teleport") end)
+	drawerButton("Shop", "Icon_Shop", C.Green, 11, function() UI.Toggle("Shop") end)
+	drawerButton("Power", "Icon_Power", C.Red, 12, function() UI.Toggle("Power") end)
+	drawerButton("Rewards", "Icon_Tower", C.Green, 13, function() UI.Toggle("Rewards") end)
 	drawerButton("Settings", "Icon_Settings", C.Sub, 14, function() UI.Toggle("Settings") end)
+	adminButton = drawerButton("Admin", "Icon_Settings", C.Red, 15, function() UI.Toggle("Admin") end)
+	adminButton.Visible = false
 
 	-- keyboard / gamepad shortcuts
 	game:GetService("UserInputService").InputBegan:Connect(function(input, processed)
@@ -1239,26 +1426,30 @@ function UI.Init(requestFn)
 			if UI.ToggleMap then
 				UI.ToggleMap()
 			end
+		elseif input.KeyCode == Enum.KeyCode.B then
+			request("Teleport", "Hub")
+		elseif input.KeyCode == Enum.KeyCode.P and UI.Data and UI.Data.IsAdmin then
+			UI.Toggle("Admin")
 		end
 	end)
 
 	-- pad indicator (only while standing on a training pad)
-	padLabel = softLabel(root, { Text = "", Font = Enum.Font.BuilderSansExtraBold, Size = UDim2.fromOffset(300, 24), Position = UDim2.new(0.5, 0, 0, inset.Y + 60), AnchorPoint = Vector2.new(0.5, 0), MaxText = 22 })
+	padLabel = softLabel(root, { Text = "", Font = Config.Fonts.Display, Size = UDim2.fromOffset(300, 24), Position = UDim2.new(0.5, 0, 0, inset.Y + 112), AnchorPoint = Vector2.new(0.5, 0), MaxText = 22 })
 	padLabel.Visible = false
 
 	-- zone banner (fades in and out on arrival)
 	zoneBanner = frame(root, { Transparency = 1, Size = UDim2.fromOffset(560, 70), Position = UDim2.new(0.5, 0, 0, 170), AnchorPoint = Vector2.new(0.5, 0) })
 	zoneBanner.Name = "ZoneBanner"
 	zoneBanner.Visible = false
-	softLabel(zoneBanner, { Name = "Title", Text = "", Font = Enum.Font.BuilderSansExtraBold, Size = UDim2.new(1, 0, 0, 40), MaxText = 38 })
-	softLabel(zoneBanner, { Name = "Sub", Text = "", Font = Enum.Font.BuilderSansMedium, Size = UDim2.new(1, 0, 0, 20), Position = UDim2.fromOffset(0, 44), MaxText = 18, Color = C.Sub })
+	softLabel(zoneBanner, { Name = "Title", Text = "", Font = Config.Fonts.Display, Size = UDim2.new(1, 0, 0, 40), MaxText = 38 })
+	softLabel(zoneBanner, { Name = "Sub", Text = "", Font = Config.Fonts.Body, Size = UDim2.new(1, 0, 0, 20), Position = UDim2.fromOffset(0, 44), MaxText = 18, Color = C.Sub })
 
-	-- tower hud (only inside the tower)
-	towerHud = frame(root, { Color = Color3.fromRGB(10, 8, 22), Transparency = 0.4, Size = UDim2.fromOffset(300, 64), Position = UDim2.fromOffset(18, inset.Y + 60), Corner = 14 })
+	-- boss rush hud (only during a run)
+	towerHud = frame(root, { Color = Color3.fromRGB(10, 8, 18), Transparency = 0.3, Size = UDim2.fromOffset(330, 64), Position = UDim2.new(0.5, 0, 0, inset.Y + 54), AnchorPoint = Vector2.new(0.5, 0), Corner = 8 })
 	towerHud.Name = "TowerHud"
 	towerHud.Visible = false
-	softLabel(towerHud, { Name = "Title", Text = "TOWER", Font = Enum.Font.BuilderSansMedium, Size = UDim2.new(0.6, 0, 0, 18), Position = UDim2.fromOffset(14, 8), XAlign = Enum.TextXAlignment.Left, Color = Color3.fromRGB(220, 160, 255) })
-	softLabel(towerHud, { Name = "Timer", Text = "--:--", Font = Enum.Font.BuilderSansExtraBold, Size = UDim2.new(0.6, 0, 0, 28), Position = UDim2.fromOffset(14, 28), XAlign = Enum.TextXAlignment.Left })
+	softLabel(towerHud, { Name = "Title", Text = "BOSS RUSH", Font = Config.Fonts.Body, Size = UDim2.new(0.6, 0, 0, 18), Position = UDim2.fromOffset(14, 8), XAlign = Enum.TextXAlignment.Left, Color = C.Pink })
+	softLabel(towerHud, { Name = "Timer", Text = "--:--", Font = Config.Fonts.Display, Size = UDim2.new(0.6, 0, 0, 28), Position = UDim2.fromOffset(14, 28), XAlign = Enum.TextXAlignment.Left })
 	UITheme.Button(towerHud, { Text = "LEAVE", Color = "Red", Size = UDim2.fromOffset(96, 40), Position = UDim2.new(1, -12, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5), MaxText = 20, OnClick = function()
 		request("TowerLeave")
 	end })
@@ -1289,6 +1480,7 @@ UI.Helpers = {
 	Clear = clearList,
 	Tween = tween,
 	Row = rowFrame,
+	Accent = accentBar,
 	MakePanel = makePanel,
 	Hex = hex,
 	Text = softLabel,

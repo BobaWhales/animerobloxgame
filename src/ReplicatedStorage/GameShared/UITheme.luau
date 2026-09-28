@@ -14,6 +14,7 @@ local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
 
 local SFX = require(script.Parent:WaitForChild("SFX"))
+local Config = require(script.Parent:WaitForChild("Config"))
 
 local UITheme = {}
 
@@ -52,21 +53,28 @@ UITheme.Templates = {
 	Icon_Tower = { "Tower", "Castle", "Trophy" },
 }
 
+-- "Ink & neon": dark ink surfaces, one bright accent per element, manga
+-- display font for anything loud, a sharp heading font for small caps and a
+-- condensed body font for reading. Every UI in the game pulls from here.
 UITheme.Colors = {
-	Bg = Color3.fromRGB(24, 20, 40),
-	Bg2 = Color3.fromRGB(44, 34, 74),
-	Stroke = Color3.fromRGB(10, 8, 18),
+	Bg = Color3.fromRGB(16, 14, 26),
+	Bg2 = Color3.fromRGB(24, 21, 38),
+	Row = Color3.fromRGB(30, 26, 46),
+	Line = Color3.fromRGB(78, 68, 120),
+	Stroke = Color3.fromRGB(6, 5, 12),
 	Text = Color3.new(1, 1, 1),
-	Sub = Color3.fromRGB(200, 195, 225),
-	Green = Color3.fromRGB(80, 220, 110),
-	Blue = Color3.fromRGB(70, 160, 255),
-	Red = Color3.fromRGB(255, 80, 95),
-	Gold = Color3.fromRGB(255, 195, 50),
-	Purple = Color3.fromRGB(170, 90, 255),
-	Pink = Color3.fromRGB(255, 110, 190),
+	Sub = Color3.fromRGB(176, 170, 205),
+	Green = Color3.fromRGB(70, 225, 120),
+	Blue = Color3.fromRGB(70, 165, 255),
+	Red = Color3.fromRGB(255, 70, 95),
+	Gold = Color3.fromRGB(255, 196, 50),
+	Purple = Color3.fromRGB(165, 95, 255),
+	Pink = Color3.fromRGB(255, 100, 185),
+	Cyan = Color3.fromRGB(60, 230, 255),
 }
-UITheme.TitleFont = Enum.Font.LuckiestGuy
-UITheme.BodyFont = Enum.Font.FredokaOne
+UITheme.TitleFont = Config.Fonts.Display
+UITheme.HeadingFont = Config.Fonts.Heading
+UITheme.BodyFont = Config.Fonts.Body
 
 -- Emoji fallbacks when the pack has no icon for a role.
 local ICON_TEXT = {
@@ -232,7 +240,8 @@ function UITheme.Label(parent: Instance, props)
 	t.Name = props.Name or "Label"
 	t.Parent = parent
 	if props.Stroke ~= false then
-		UITheme.Stroke(t, props.StrokeThickness or 2)
+		local st = UITheme.Stroke(t, props.StrokeThickness or (props.Title and 2 or 1.2))
+		st.Transparency = props.Title and 0 or 0.25
 	end
 	local cons = Instance.new("UITextSizeConstraint")
 	cons.MaxTextSize = props.MaxText or 40
@@ -273,10 +282,11 @@ function UITheme.Panel(parent: Instance, props)
 	else
 		frame = Instance.new("Frame")
 		frame.BackgroundColor3 = UITheme.Colors.Bg
-		UITheme.Corner(frame, 18)
-		UITheme.Stroke(frame, 4, UITheme.Colors.Stroke, true)
-		UITheme.Gradient(frame, Color3.fromRGB(255, 255, 255), Color3.fromRGB(170, 160, 200), 90)
-		frame.BackgroundColor3 = UITheme.Colors.Bg2
+		frame.BackgroundTransparency = 0.04
+		UITheme.Corner(frame, 14)
+		local st = UITheme.Stroke(frame, 1.5, props.Accent or UITheme.Colors.Line, true)
+		st.Transparency = 0.2
+		UITheme.Gradient(frame, Color3.fromRGB(255, 255, 255), Color3.fromRGB(150, 145, 175), 90)
 	end
 	frame.Name = props.Name or "Panel"
 	frame.Size = props.Size
@@ -318,23 +328,32 @@ function UITheme.Button(parent: Instance, props)
 		applySkin(btn, src)
 		btn.AutoButtonColor = false
 	else
+		-- chunky "simulator" button: solid accent, darker lip along the bottom,
+		-- a thin top highlight and a hard ink outline
 		btn = Instance.new("TextButton")
 		btn.Text = ""
 		btn.AutoButtonColor = false
 		local base = UITheme.Colors[colorName] or UITheme.Colors.Green
 		btn.BackgroundColor3 = base
-		UITheme.Corner(btn, props.Corner or 12)
-		UITheme.Stroke(btn, 3, UITheme.Colors.Stroke, true)
-		UITheme.Gradient(btn, Color3.new(1, 1, 1), Color3.fromRGB(175, 175, 175), 90)
-		-- glossy top shine
+		UITheme.Corner(btn, props.Corner or 10)
+		UITheme.Stroke(btn, 2, UITheme.Colors.Stroke, true)
+		UITheme.Gradient(btn, Color3.new(1, 1, 1), Color3.fromRGB(205, 205, 205), 90)
+		local lip = Instance.new("Frame")
+		lip.Name = "Lip"
+		lip.AnchorPoint = Vector2.new(0, 1)
+		lip.Position = UDim2.fromScale(0, 1)
+		lip.Size = UDim2.new(1, 0, 0, 5)
+		lip.BackgroundColor3 = base:Lerp(Color3.new(0, 0, 0), 0.4)
+		lip.BorderSizePixel = 0
+		lip.Parent = btn
+		UITheme.Corner(lip, props.Corner or 10)
 		local shine = Instance.new("Frame")
 		shine.Name = "Shine"
 		shine.BackgroundColor3 = Color3.new(1, 1, 1)
-		shine.BackgroundTransparency = 0.75
-		shine.Size = UDim2.new(1, -10, 0.35, 0)
-		shine.Position = UDim2.fromOffset(5, 4)
+		shine.BackgroundTransparency = 0.7
+		shine.Size = UDim2.new(1, -12, 0, 2)
+		shine.Position = UDim2.fromOffset(6, 3)
 		shine.BorderSizePixel = 0
-		UITheme.Corner(shine, 8)
 		shine.Parent = btn
 	end
 	btn.Name = props.Name or "Button"
@@ -384,6 +403,40 @@ function UITheme.Button(parent: Instance, props)
 		end)
 	end
 	return btn
+end
+
+-- Small text with a light drop shadow (HUD, world text, callouts).
+function UITheme.Text(parent: Instance, props)
+	local t = Instance.new("TextLabel")
+	t.Name = props.Name or "Text"
+	t.BackgroundTransparency = 1
+	t.Font = props.Font or UITheme.HeadingFont
+	t.TextScaled = props.TextSize == nil
+	if props.TextSize then
+		t.TextSize = props.TextSize
+	end
+	t.Text = props.Text or ""
+	t.TextColor3 = props.Color or UITheme.Colors.Text
+	t.TextTransparency = props.Transparency or 0
+	t.Size = props.Size or UDim2.fromScale(1, 1)
+	t.Position = props.Position or UDim2.new()
+	t.AnchorPoint = props.AnchorPoint or Vector2.zero
+	t.TextXAlignment = props.XAlign or Enum.TextXAlignment.Center
+	t.RichText = props.Rich == true
+	t.ZIndex = props.ZIndex or 1
+	t.LayoutOrder = props.Order or 0
+	t.Parent = parent
+	local st = Instance.new("UIStroke")
+	st.Thickness = props.StrokeThickness or 1
+	st.Color = UITheme.Colors.Stroke
+	st.Transparency = 0.45
+	st.Parent = t
+	if props.MaxText then
+		local cons = Instance.new("UITextSizeConstraint")
+		cons.MaxTextSize = props.MaxText
+		cons.Parent = t
+	end
+	return t
 end
 
 function UITheme.SetButtonText(btn: GuiObject, text: string)

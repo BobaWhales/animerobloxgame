@@ -13,7 +13,9 @@
 --     boss, outlined square = stage) that expand into a detailed callout on
 --     hover / tap, with Track (world marker) and Travel buttons.
 -- Controls: drag / WASD / left stick to pan, wheel / pinch / Q-E / LB-RB to
--- zoom, M or B to close.
+-- zoom, M to close. Layout: spawn plaza in the middle, Training Grounds to
+-- the west, the Boss Rush island to the east and the 30-stage Path running
+-- north (drawn compressed so the whole run fits).
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -38,22 +40,17 @@ local data = nil
 ---------------------------------------------------------------------
 -- LAYOUT (map units; 1 unit = 1 px at zoom 1)
 ---------------------------------------------------------------------
-local OW = 2 -- map units per stud in the overworld
-local DS = 0.75 -- map units per stud inside dungeon islands
-local L = Config.DungeonLayout
-local HALL_LEN = L.StartLen + L.RoomLen * Config.StagesPerZone
-local ISLANDS = {
-	[1] = { X = -330, Bottom = -330 },
-	[2] = { X = 330, Bottom = -330 },
-}
-local SOON = {
-	[3] = Vector2.new(-360, -960),
-	[4] = Vector2.new(0, -1020),
-	[5] = Vector2.new(360, -960),
-}
-local BOUNDS_MIN = Vector2.new(-700, -1180)
-local BOUNDS_MAX = Vector2.new(620, 260)
-local TOWER_WORLD = Vector3.new(160, 0, 0)
+local OW = 2 -- map units per stud around spawn (plaza, training, boss rush)
+local PX = 1.2 -- map units per stud across the Path
+local PZ = 0.5 -- map units per stud along the Path (it is ~3000 studs long)
+local W = Config.World
+local PATH_TOP = W.PathStartZ * OW -- map y where the first gate sits
+local PATH_END_Z = select(2, Config.StageBounds(#Config.Stages))
+local PATH_BOTTOM = PATH_TOP + (PATH_END_Z - W.PathStartZ) * PZ
+local BOUNDS_MIN = Vector2.new(-700, PATH_BOTTOM - 160)
+local BOUNDS_MAX = Vector2.new(700, 320)
+local TRAIN_MAP = Vector2.new(W.TrainCenter.X * OW, W.TrainCenter.Z * OW)
+local RUSH_MAP = Vector2.new(W.BossRushCenter.X * OW, W.BossRushCenter.Z * OW)
 
 local COL = {
 	Bg = Color3.fromRGB(5, 8, 17),
@@ -162,7 +159,7 @@ local function text(parent: Instance, x: number, y: number, str: string, size: n
 	t.Size = UDim2.fromOffset(0, 0)
 	t.Position = UDim2.fromOffset(x, y)
 	t.AnchorPoint = anchor or Vector2.new(0.5, 0.5)
-	t.Font = font or Enum.Font.BuilderSansBold
+	t.Font = font or Config.Fonts.Heading
 	t.TextSize = size
 	t.Text = str
 	t.TextColor3 = color
@@ -178,61 +175,49 @@ end
 ---------------------------------------------------------------------
 -- COORDINATES
 ---------------------------------------------------------------------
-local function dungeonAt(pos: Vector3): (number?, number)
-	for zoneId, o in pairs(L.Origins) do
-		local depth = (o.Z + L.StartLen / 2) - pos.Z
-		if math.abs(pos.X - o.X) < L.RoomWidth / 2 + 12 and depth > -12 and depth < HALL_LEN + 12 then
-			return zoneId, depth
-		end
-	end
-	return nil, 0
+local function onPath(pos: Vector3): boolean
+	return pos.Z < W.PathStartZ + 2 and math.abs(pos.X) < W.PathWidth / 2 + 12
 end
 
 local function worldToMap(pos: Vector3): Vector2
-	local zoneId, depth = dungeonAt(pos)
-	if zoneId and ISLANDS[zoneId] then
-		local o = L.Origins[zoneId]
-		local isl = ISLANDS[zoneId]
-		return Vector2.new(isl.X + (pos.X - o.X) * DS, isl.Bottom - depth * DS)
+	if onPath(pos) then
+		return Vector2.new(pos.X * PX, PATH_TOP + (pos.Z - W.PathStartZ) * PZ)
 	end
 	if pos.X > 2000 then
-		-- private tower arenas live far away; show them at the tower
-		return Vector2.new(TOWER_WORLD.X * OW, TOWER_WORLD.Z * OW)
+		-- private Boss Rush arenas live far away; show them at the island
+		return RUSH_MAP
 	end
 	return Vector2.new(pos.X * OW, pos.Z * OW)
 end
 
-local function roomRect(zoneId: number, i: number)
-	local isl = ISLANDS[zoneId]
-	local w = L.RoomWidth * DS
-	local startH = L.StartLen * DS
-	local roomH = L.RoomLen * DS
-	local top = isl.Bottom - startH - i * roomH
-	return { isl.X - w / 2, top, w, roomH }
-end
-
-local function startRect(zoneId: number)
-	local isl = ISLANDS[zoneId]
-	local w = L.RoomWidth * DS
-	local h = L.StartLen * DS
-	return { isl.X - w / 2, isl.Bottom - h, w, h }
+-- Map rect { x, y, w, h } of stage i on the Path.
+local function stageRect(i: number)
+	local zStart, zEnd = Config.StageBounds(i)
+	local top = PATH_TOP + (zEnd - W.PathStartZ) * PZ
+	local h = (zStart - zEnd) * PZ
+	local w = W.PathWidth * PX
+	return { -w / 2, top, w, h }
 end
 
 local function stageWorldCenter(stageIndex: number): Vector3?
-	local stage = Config.Stages[stageIndex]
-	local o = stage and L.Origins[stage.Zone]
-	if not o then
+	if not Config.Stages[stageIndex] then
 		return nil
 	end
-	local i = stageIndex - (stage.Zone - 1) * Config.StagesPerZone
-	local gateZ = o.Z + L.StartLen / 2 - L.StartLen - (i - 1) * L.RoomLen
-	return Vector3.new(o.X, 3, gateZ - L.RoomLen / 2)
+	local _, _, center = Config.StageBounds(stageIndex)
+	return center + Vector3.new(0, 3, 0)
 end
 
-local function trainRange(): (number, number)
-	local startX = -110
-	local endX = startX - (#Config.TrainPads - 1) * 24
-	return endX - 20, startX + 20
+local function stageAt(pos: Vector3): number?
+	if not onPath(pos) then
+		return nil
+	end
+	for i in ipairs(Config.Stages) do
+		local zStart, zEnd = Config.StageBounds(i)
+		if pos.Z <= zStart and pos.Z > zEnd then
+			return i
+		end
+	end
+	return nil
 end
 
 ---------------------------------------------------------------------
@@ -273,7 +258,7 @@ local function addFog(key: string, rect, label: string?, permanent: boolean?)
 	end
 	local lbl = nil
 	if label then
-		lbl = text(layers.FogHigh.Frame, x + w / 2, y + h / 2, label, 13, Color3.fromRGB(235, 240, 255), Enum.Font.BuilderSansBold)
+		lbl = text(layers.FogHigh.Frame, x + w / 2, y + h / 2, label, 13, Color3.fromRGB(235, 240, 255), Config.Fonts.Heading)
 		lbl.TextTransparency = 0.15
 		lbl.ZIndex = 5
 	end
@@ -342,9 +327,13 @@ local function drawBackground()
 			stroke(c, COL.Edge, 1, t + (r - from) / (to - from + 1) * 0.08)
 		end
 	end
-	rings(0, 0, 150, 520, 46, 0.84)
-	rings(ISLANDS[1].X, (ISLANDS[1].Bottom - HALL_LEN * DS / 2), 260, 420, 55, 0.88)
-	rings(ISLANDS[2].X, (ISLANDS[2].Bottom - HALL_LEN * DS / 2), 260, 420, 55, 0.88)
+	rings(0, 0, 170, 560, 46, 0.84)
+	rings(TRAIN_MAP.X, TRAIN_MAP.Y, 120, 260, 45, 0.88)
+	rings(RUSH_MAP.X, RUSH_MAP.Y, 120, 260, 45, 0.88)
+	for z = 1, #Config.Zones do
+		local first = stageRect((z - 1) * Config.StagesPerZone + 1)
+		rings(0, first[2] + first[4] - 180, 240, 420, 60, 0.9)
+	end
 end
 
 local function region(parent, rect, fill: Color3, edge: Color3, r: number?)
@@ -356,81 +345,58 @@ end
 
 local function drawWorld()
 	local w = layers.World.Frame
-
-	-- hub plaza
-	local plaza = circle(w, 0, 0, 60 * OW + 40, COL.Land, 0.1)
-	stroke(plaza, COL.Edge, 1.5, 0.3)
-	local core = circle(w, 0, 0, 30 * OW, COL.Land2, 0.1)
-	stroke(core, Color3.fromRGB(255, 130, 200), 1, 0.45)
-	text(w, 0, 60 * OW + 58, "HUB", 13, COL.Text, Enum.Font.BuilderSansExtraBold).TextTransparency = 0.2
-
-	-- paths
 	local path = Color3.fromRGB(40, 60, 100)
-	frame(w, -105 * OW, -7 * OW, 50 * OW, 14 * OW, path, 0.2)
-	frame(w, -7 * OW, -107 * OW, 14 * OW, 50 * OW, path, 0.2)
-	frame(w, 55 * OW, -7 * OW, 80 * OW, 14 * OW, path, 0.2)
 
-	-- train grounds
-	local minX, maxX = trainRange()
-	local train = { minX * OW, -28 * OW, (maxX - minX) * OW, 56 * OW }
-	region(w, train, COL.Land, Color3.fromRGB(150, 255, 190))
-	for i, pad in ipairs(Config.TrainPads) do
-		local x = (-110 - (i - 1) * 24) * OW
-		local c = circle(w, x, 0, Config.TrainPadRadius * OW * 0.8, pad.Color, 0.55)
-		stroke(c, pad.Color, 1, 0.2)
-	end
-	text(w, train[1] + train[3] / 2, train[2] + train[4] + 16, "TRAIN GROUNDS", 12, COL.Text, Enum.Font.BuilderSansExtraBold).TextTransparency = 0.25
+	-- spawn plaza
+	local plaza = circle(w, 0, 0, W.PlazaRadius * OW, COL.Land, 0.1)
+	stroke(plaza, COL.Edge, 1.5, 0.3)
+	local core = circle(w, 0, 0, 22 * OW, COL.Land2, 0.1)
+	stroke(core, Color3.fromRGB(255, 140, 60), 1, 0.45)
+	text(w, 0, W.PlazaRadius * OW + 18, "SPAWN", 13, COL.Text, Config.Fonts.Display).TextTransparency = 0.2
 
-	-- portal gate
-	local portalRect = { -80 * OW, -130 * OW, 160 * OW, 28 * OW }
-	region(w, portalRect, COL.Land, COL.Travel)
-	text(w, 0, portalRect[2] - 14, "PORTAL GATE", 12, COL.Text, Enum.Font.BuilderSansExtraBold).TextTransparency = 0.25
+	-- bridges: plaza -> training (west), boss rush (east), the Path (north)
+	frame(w, TRAIN_MAP.X + 60 * OW, -6 * OW, (-W.PlazaRadius * OW) - (TRAIN_MAP.X + 60 * OW), 12 * OW, path, 0.2)
+	frame(w, W.PlazaRadius * OW, -6 * OW, RUSH_MAP.X - 50 * OW - W.PlazaRadius * OW, 12 * OW, path, 0.2)
+	frame(w, -11 * OW, PATH_TOP, 22 * OW, -W.PlazaRadius * OW - PATH_TOP, path, 0.2)
 
-	-- tower
-	local tower = circle(w, TOWER_WORLD.X * OW, 0, 22 * OW, COL.Land2, 0.1)
-	stroke(tower, COL.Power, 1.5, 0.3)
-	text(w, TOWER_WORLD.X * OW, 22 * OW + 16, "INFINITE TOWER", 12, COL.Text, Enum.Font.BuilderSansExtraBold).TextTransparency = 0.25
-
-	-- dungeon islands + portal links
-	for zoneId, isl in pairs(ISLANDS) do
-		local zone = Config.Zones[zoneId]
-		local accent = zone and zone.Accent or COL.Edge
-		local portalX = (-64 + (zoneId - 1) * 32) * OW
-		dotted(w, Vector2.new(portalX, -130 * OW), Vector2.new(isl.X, isl.Bottom + 6), 14, 3, accent, 0.35)
-		local sr = startRect(zoneId)
-		region(w, sr, COL.Land, accent, 6)
-		for i = 1, Config.StagesPerZone do
-			local rr = roomRect(zoneId, i)
-			local stageIndex = (zoneId - 1) * Config.StagesPerZone + i
-			local boss = Config.Stages[stageIndex] and Config.Stages[stageIndex].Boss
-			region(w, rr, boss and Color3.fromRGB(40, 16, 30) or COL.Land, boss and COL.Danger or accent, 4)
+	-- training grounds
+	local train = { TRAIN_MAP.X - 60 * OW, TRAIN_MAP.Y - 50 * OW, 120 * OW, 100 * OW }
+	region(w, train, COL.Land, Color3.fromRGB(150, 255, 190), 20)
+	for _, part in ipairs(CollectionService:GetTagged("TrainPad")) do
+		if part:IsA("BasePart") then
+			local m = worldToMap(part.Position)
+			local c = circle(w, m.X, m.Y, Config.TrainPadRadius * OW * 0.8, part.Color, 0.55)
+			stroke(c, part.Color, 1, 0.2)
 		end
-		text(w, isl.X, isl.Bottom - HALL_LEN * DS - 20, zone and zone.Name:upper() or "", 13, accent, Enum.Font.BuilderSansExtraBold)
+	end
+	text(w, TRAIN_MAP.X, train[2] + train[4] + 16, "TRAINING GROUNDS", 12, COL.Text, Config.Fonts.Display).TextTransparency = 0.25
+
+	-- boss rush island
+	local rush = circle(w, RUSH_MAP.X, RUSH_MAP.Y, 46 * OW, COL.Land2, 0.1)
+	stroke(rush, COL.Danger, 1.5, 0.3)
+	text(w, RUSH_MAP.X, RUSH_MAP.Y + 46 * OW + 16, "BOSS RUSH", 12, COL.Text, Config.Fonts.Display).TextTransparency = 0.25
+
+	-- the Path: one strip per stage, zone headers, boss arenas in red
+	for i, stage in ipairs(Config.Stages) do
+		local zone = Config.Zones[stage.Zone]
+		local rr = stageRect(i)
+		region(w, rr, stage.Boss and Color3.fromRGB(40, 16, 30) or COL.Land, stage.Boss and COL.Danger or zone.Accent, 4)
+		local n = text(w, rr[1] + rr[3] + 16, rr[2] + rr[4] / 2, tostring(i), 11, stage.Boss and COL.Danger or zone.Accent, Config.Fonts.Heading)
+		n.TextTransparency = 0.3
+		if (i - 1) % Config.StagesPerZone == 0 then
+			text(w, rr[1] - 14, rr[2] + rr[4] / 2, zone.Name:upper(), 12, zone.Accent, Config.Fonts.Display, Vector2.new(1, 0.5))
+		end
 	end
 
-	-- future zones (always fogged)
-	for zoneId, c in pairs(SOON) do
-		local zone = Config.Zones[zoneId]
-		local accent = zone and zone.Accent or COL.Edge
-		for k, off in ipairs({ Vector2.new(-40, 10), Vector2.new(30, -10), Vector2.new(0, 30) }) do
-			local blob = circle(w, c.X + off.X, c.Y + off.Y, 70 - k * 8, COL.Land, 0.2)
-			stroke(blob, accent, 1, 0.5)
-		end
-		addFog("Soon" .. zoneId, { c.X - 110, c.Y - 90, 220, 190 }, (zone and zone.Name or "???") .. "\nCOMING SOON", true)
-	end
+	-- route line down the middle of the Path
+	dotted(w, Vector2.new(0, PATH_TOP), Vector2.new(0, PATH_BOTTOM), 22, 3, COL.Edge, 0.55)
 
 	-- fog over everything that can be explored
 	addFog("Train", { train[1] - 20, train[2] - 30, train[3] + 40, train[4] + 70 }, "UNCHARTED")
-	addFog("Portals", { portalRect[1] - 20, portalRect[2] - 34, portalRect[3] + 40, portalRect[4] + 50 }, "UNCHARTED")
-	addFog("Tower", { TOWER_WORLD.X * OW - 60, -60, 120, 150 }, "UNCHARTED")
-	for zoneId in pairs(ISLANDS) do
-		local sr = startRect(zoneId)
-		addFog("Z" .. zoneId, { sr[1] - 14, sr[2], sr[3] + 28, sr[4] + 14 }, nil)
-		for i = 1, Config.StagesPerZone do
-			local rr = roomRect(zoneId, i)
-			local stageIndex = (zoneId - 1) * Config.StagesPerZone + i
-			addFog("S" .. stageIndex, { rr[1] - 14, rr[2], rr[3] + 28, rr[4] }, i == Config.StagesPerZone and "?" or nil)
-		end
+	addFog("BossRush", { RUSH_MAP.X - 110, RUSH_MAP.Y - 110, 220, 250 }, "UNCHARTED")
+	for i, stage in ipairs(Config.Stages) do
+		local rr = stageRect(i)
+		addFog("S" .. i, { rr[1] - 14, rr[2], rr[3] + 28, rr[4] }, stage.Boss and "?" or nil)
 	end
 end
 
@@ -442,15 +408,12 @@ local function stageStatus(stageIndex: number): (boolean, string)
 	if not stage or not data then
 		return false, ""
 	end
-	local zone = Config.Zones[stage.Zone]
-	local okPower = data.Power >= stage.PowerReq
-	local okBlade = data.Blade >= (zone.BladeReq or 0)
-	if okPower and okBlade then
-		return true, "Unlocked"
-	elseif not okBlade then
-		return false, "Needs Blade +" .. Format.Abbrev(zone.BladeReq)
+	if data.Stage >= stageIndex then
+		return true, "Cleared"
+	elseif data.Stage == stageIndex - 1 then
+		return true, "Current stage - " .. math.min(data.StageKills or 0, stage.Kills) .. "/" .. stage.Kills .. " KOs"
 	end
-	return false, "Needs " .. Format.Abbrev(stage.PowerReq) .. " Power"
+	return false, "Clear stage " .. (stageIndex - 1) .. " to open"
 end
 
 local function shapeFor(kind: string, color: Color3, parent: Instance)
@@ -633,8 +596,9 @@ local function buildIcons()
 			return
 		end
 		local kind = part:GetAttribute("POIKind")
-		if not kind or kind == "Danger" then
-			return -- boss arenas are drawn from the stage list below
+		local region = part:GetAttribute("Region")
+		if not kind or (kind == "Danger" and type(region) == "string" and region:match("^S%d")) then
+			return -- stage boss arenas are drawn from the stage list below
 		end
 		addIcon({
 			Name = part:GetAttribute("POIName") or part.Name,
@@ -651,14 +615,14 @@ local function buildIcons()
 		fromPoi(part)
 	end
 	CollectionService:GetInstanceAddedSignal("POI"):Connect(fromPoi)
-	-- dungeon stages
+	-- Path stages
 	for stageIndex, stage in ipairs(Config.Stages) do
 		local wp = stageWorldCenter(stageIndex)
 		if wp then
 			addIcon({
 				Name = (stage.Boss and "BOSS: " or "Stage " .. stageIndex .. ": ") .. stage.Enemy,
 				Kind = stage.Boss and "Danger" or "Stage",
-				Desc = stage.Boss and ("Stage " .. stageIndex .. " boss. Drops rare ore and weapons.") or ("Drops: " .. Format.Abbrev(stage.Coins) .. " Coins + ore per kill."),
+				Desc = stage.Boss and ("Stage " .. stageIndex .. " boss. Rare ore, catalysts and armor.") or ("KO " .. stage.Kills .. " to open the next gate. " .. Format.Abbrev(stage.Coins) .. " Coins + ore per kill."),
 				Region = "S" .. stageIndex,
 				Travel = "Stage_" .. stageIndex,
 				WorldPos = wp,
@@ -706,10 +670,10 @@ local function buildCallout(parent: Instance)
 		t.Parent = c
 		return t
 	end
-	CO.Kind = lbl("Kind", 9, 12, Enum.Font.BuilderSansBold, COL.Edge, 11)
-	CO.Title = lbl("Title", 22, 20, Enum.Font.BuilderSansExtraBold, Color3.new(1, 1, 1), 17)
-	CO.Desc = lbl("Desc", 44, 32, Enum.Font.BuilderSansMedium, COL.Text, 13)
-	CO.Status = lbl("Status", 76, 14, Enum.Font.BuilderSansBold, COL.Text, 12)
+	CO.Kind = lbl("Kind", 9, 12, Config.Fonts.Heading, COL.Edge, 11)
+	CO.Title = lbl("Title", 22, 20, Config.Fonts.Display, Color3.new(1, 1, 1), 17)
+	CO.Desc = lbl("Desc", 44, 32, Config.Fonts.Body, COL.Text, 13)
+	CO.Status = lbl("Status", 76, 14, Config.Fonts.Heading, COL.Text, 12)
 	local function btn(name, label, x, color, onClick)
 		local b = Instance.new("TextButton")
 		b.Name = name
@@ -727,7 +691,7 @@ local function buildCallout(parent: Instance)
 		t.Name = "Label"
 		t.BackgroundTransparency = 1
 		t.Size = UDim2.fromScale(1, 1)
-		t.Font = Enum.Font.BuilderSansBold
+		t.Font = Config.Fonts.Heading
 		t.TextSize = 12
 		t.Text = label
 		t.TextColor3 = Color3.new(1, 1, 1)
@@ -803,7 +767,7 @@ function WorldMap.Track(icon)
 	t.BackgroundTransparency = 1
 	t.Position = UDim2.fromOffset(0, 16)
 	t.Size = UDim2.new(1, 0, 0, 14)
-	t.Font = Enum.Font.BuilderSansBold
+	t.Font = Config.Fonts.Heading
 	t.TextSize = 12
 	t.TextColor3 = Color3.new(1, 1, 1)
 	t.Text = ""
@@ -1014,11 +978,9 @@ local function markExplored(key: string, announce: boolean)
 				local z = Config.Zones[tonumber(key:sub(2)) or 0]
 				name = z and z.Name or key
 			elseif key == "Train" then
-				name = "Train Grounds"
-			elseif key == "Portals" then
-				name = "Portal Gate"
-			elseif key == "Tower" then
-				name = "Infinite Tower"
+				name = "Training Grounds"
+			elseif key == "BossRush" then
+				name = "Boss Rush"
 			end
 			if r then
 				UI.Notify("Map updated: " .. name, Color3.fromRGB(120, 220, 255))
@@ -1029,30 +991,17 @@ end
 
 local function currentRegions(pos: Vector3): { string }
 	local out = {}
-	local zoneId, depth = dungeonAt(pos)
-	if zoneId then
-		table.insert(out, "Z" .. zoneId)
-		local i = math.floor((depth - L.StartLen) / L.RoomLen) + 1
-		if depth > L.StartLen and i >= 1 and i <= Config.StagesPerZone then
-			table.insert(out, "S" .. ((zoneId - 1) * Config.StagesPerZone + i))
-		end
+	local i = stageAt(pos)
+	if i then
+		table.insert(out, "S" .. i)
+		table.insert(out, "Z" .. Config.Stages[i].Zone)
 		return out
 	end
-	if pos.X > 2000 then
-		table.insert(out, "Tower")
-		return out
-	end
-	local minX, maxX = trainRange()
-	if pos.X < -95 and pos.X > minX - 20 and math.abs(pos.Z) < 45 then
+	if pos.X > 2000 or (Vector3.new(pos.X, 0, pos.Z) - W.BossRushCenter).Magnitude < 70 then
+		table.insert(out, "BossRush")
+	elseif (Vector3.new(pos.X, 0, pos.Z) - W.TrainCenter).Magnitude < 90 then
 		table.insert(out, "Train")
 	end
-	if pos.Z < -100 and pos.Z > -145 and math.abs(pos.X) < 95 then
-		table.insert(out, "Portals")
-	end
-	if (Vector3.new(pos.X, 0, pos.Z) - TOWER_WORLD).Magnitude < 45 then
-		table.insert(out, "Tower")
-	end
-	local _ = maxX
 	return out
 end
 
@@ -1184,7 +1133,7 @@ local function legendChip(parent: Instance, x: number, kind: string, label: stri
 	t.BackgroundTransparency = 1
 	t.Position = UDim2.fromOffset(24, 0)
 	t.Size = UDim2.new(1, -24, 1, 0)
-	t.Font = Enum.Font.BuilderSansMedium
+	t.Font = Config.Fonts.Body
 	t.TextSize = 13
 	t.TextXAlignment = Enum.TextXAlignment.Left
 	t.TextColor3 = COL.Text
@@ -1200,7 +1149,7 @@ local function roundButton(parent: Instance, label: string, pos: UDim2, onClick)
 	b.Size = UDim2.fromOffset(36, 36)
 	b.Position = pos
 	b.AnchorPoint = Vector2.new(1, 1)
-	b.Font = Enum.Font.BuilderSansExtraBold
+	b.Font = Config.Fonts.Display
 	b.TextSize = label:len() > 1 and 12 or 20
 	b.TextColor3 = COL.Text
 	b.Text = label
@@ -1340,7 +1289,7 @@ function WorldMap.Init(ui, requestFn)
 	local title = Instance.new("TextLabel")
 	title.BackgroundTransparency = 1
 	title.Size = UDim2.new(1, 0, 0, 26)
-	title.Font = Enum.Font.BuilderSansExtraBold
+	title.Font = Config.Fonts.Display
 	title.TextSize = 24
 	title.TextXAlignment = Enum.TextXAlignment.Left
 	title.TextColor3 = Color3.new(1, 1, 1)
@@ -1349,7 +1298,7 @@ function WorldMap.Init(ui, requestFn)
 	local hint = title:Clone()
 	hint.Position = UDim2.fromOffset(0, 28)
 	hint.Size = UDim2.new(1, 0, 0, 16)
-	hint.Font = Enum.Font.BuilderSansMedium
+	hint.Font = Config.Fonts.Body
 	hint.TextSize = 13
 	hint.TextColor3 = COL.Text
 	hint.TextTransparency = 0.25

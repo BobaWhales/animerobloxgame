@@ -4,7 +4,8 @@
 
 local Format = {}
 
-local SUFFIXES = { "", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc" }
+-- Short scale up to 10^93, then scientific notation (the game is exponential).
+local SUFFIXES = { "", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc", "Ud", "Dd", "Td", "Qad", "Qid", "Sxd", "Spd", "Ocd", "Nod", "Vg", "Uvg", "Dvg", "Tvg", "Qavg", "Qivg", "Sxvg", "Spvg", "Ocvg", "Novg", "Tg" }
 
 function Format.Abbrev(n: number): string
 	n = tonumber(n) or 0
@@ -13,6 +14,13 @@ function Format.Abbrev(n: number): string
 	if n < 1000 then
 		local s = if n == math.floor(n) then tostring(math.floor(n)) else string.format("%.1f", n)
 		return (negative and "-" or "") .. s
+	end
+	if n == math.huge or n ~= n then
+		return "INF"
+	end
+	if n >= 1e96 then
+		local e = math.floor(math.log10(n))
+		return (negative and "-" or "") .. string.format("%.2fe%d", n / 10 ^ e, e)
 	end
 	local tier = math.min(math.floor(math.log10(n) / 3), #SUFFIXES - 1)
 	local scaled = n / 10 ^ (tier * 3)

@@ -1,7 +1,9 @@
 --!nonstrict
 -- TowerService (ModuleScript) -> ServerScriptService/Server/TowerService
--- Infinite Tower: a private arena per player. Beat the floor Guardian
--- before the timer runs out to earn Coins, Runes (+2% dmg each) and ore.
+-- BOSS RUSH: a private arena per player. Bosses come back to back (two at
+-- once every 5th wave); beat each wave before its timer runs out. Every wave
+-- pays Coins, Runes (+2% dmg each) and ore, with armour + catalyst chances.
+-- Your best wave is saved (TowerBest).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -68,29 +70,33 @@ local function buildArena(slot: number)
 	return m, center
 end
 
-local function oreTable(floor: number)
-	if floor < 5 then
-		return Config.Stages[3].Drops
-	elseif floor < 10 then
-		return Config.Stages[4].Drops
-	elseif floor < 20 then
-		return Config.Stages[7].Drops
+local BR = Config.BossRush
+local BOSS_STAGES = {}
+for i, stage in ipairs(Config.Stages) do
+	if stage.Boss then
+		table.insert(BOSS_STAGES, i)
 	end
-	return Config.Stages[9].Drops
 end
 
-local function floorColor(floor: number): Color3
-	return Color3.fromHSV((floor * 0.13) % 1, 0.7, 1)
+local function oreTable(wave: number)
+	local stageIndex = math.clamp(BR.StageReq + wave, 1, #Config.Stages)
+	return Config.Stages[stageIndex].Drops
+end
+
+local function waveColor(wave: number): Color3
+	return Color3.fromHSV((wave * 0.13) % 1, 0.7, 1)
 end
 
 local function cleanup(player: Player, run)
-	if run.Guardian and not run.Guardian.Dead then
-		run.Guardian.Dead = true
-		local idx = table.find(EnemyService.Active, run.Guardian)
-		if idx then
-			table.remove(EnemyService.Active, idx)
+	for _, boss in ipairs(run.Bosses or {}) do
+		if not boss.Dead then
+			boss.Dead = true
+			local idx = table.find(EnemyService.Active, boss)
+			if idx then
+				table.remove(EnemyService.Active, idx)
+			end
+			boss.Model:Destroy()
 		end
-		run.Guardian.Model:Destroy()
 	end
 	if run.Arena then
 		run.Arena:Destroy()
@@ -108,77 +114,92 @@ local function finish(player: Player, run, state: string)
 		return
 	end
 	run.Active = false
-	Net.FX(player, "Tower", { State = state, Floor = run.Floor })
+	Net.FX(player, "Tower", { State = state, Floor = run.Wave, Best = (DataService.Get(player) or {}).TowerBest })
 	task.delay(state == "Leave" and 0.2 or 2.2, function()
 		if player.Parent and player.Character and map then
-			Util.Teleport(player, map.TowerCFrame, "Tower")
+			Util.Teleport(player, map.TowerCFrame, "Boss Rush")
 		end
 		cleanup(player, run)
 	end)
 end
 
-local startFloor
+local startWave
 
-local function onWin(player: Player, run)
+local function onWaveCleared(player: Player, run)
 	local data = DataService.Get(player)
 	if not data or not run.Active then
 		return
 	end
-	local floor = run.Floor
-	local coins = math.floor(Config.Tower.CoinBase * floor ^ 1.6 * Stats.CoinMult(player))
+	local wave = run.Wave
+	local coins = math.floor(BR.CoinBase * BR.CoinGrowth ^ (wave - 1) * Stats.CoinMult(player))
 	data.Coins += coins
-	data.Runes += Config.Tower.RunesPerFloor
-	data.TowerBest = math.max(data.TowerBest, floor)
-	local drops = oreTable(floor)
+	data.Runes += BR.RunesPerBoss * #run.Bosses
+	data.TowerBest = math.max(data.TowerBest, wave)
+	local drops = oreTable(wave)
 	local luck = Stats.Luck(player)
-	for i = 1, 2 + math.floor(floor / 5) do
-		local oreId = (floor % 25 == 0 and i == 1) and "RiftCore" or Loot.RollOre(drops, luck)
+	for _ = 1, 2 + math.floor(wave / 4) do
 		local a = math.random() * math.pi * 2
-		Loot.Drop(player, oreId, run.Center + Vector3.new(math.cos(a) * 6, 1.2, math.sin(a) * 6))
+		Loot.Drop(player, Loot.RollOre(drops, luck), run.Center + Vector3.new(math.cos(a) * 6, 1.2, math.sin(a) * 6))
 	end
-	EnemyService.WeaponDrop(player, Config.WeaponDropChance.Tower)
+	EnemyService.GearDrop(player, Config.ArmorDropChance.BossRush)
+	local extra = ""
+	if wave % BR.CatalystEvery == 0 then
+		data.Keys.RareScroll = (data.Keys.RareScroll or 0) + 1
+		extra = "  +1 Rare+ Catalyst"
+	end
 	DataService.MarkDirty(player)
-	Net.FX(player, "Tower", { State = "Win", Floor = floor, Coins = coins, Runes = Config.Tower.RunesPerFloor, Text = "+" .. Format.Abbrev(coins) .. " Coins  +" .. Config.Tower.RunesPerFloor .. " Rune" })
+	Net.FX(player, "Tower", { State = "Win", Floor = wave, Coins = coins, Text = "+" .. Format.Abbrev(coins) .. " Coins  +" .. (BR.RunesPerBoss * #run.Bosses) .. " Rune" .. extra })
 	run.Paused = true
-	task.delay(4, function()
+	task.delay(BR.Break, function()
 		if run.Active and player.Parent then
-			run.Floor += 1
-			startFloor(player, run)
+			run.Wave += 1
+			startWave(player, run)
 		end
 	end)
 end
 
-startFloor = function(player: Player, run)
-	local floor = run.Floor
-	local hp = Config.Tower.BaseHP * Config.Tower.HPGrowth ^ (floor - 1)
-	local color = floorColor(floor)
+startWave = function(player: Player, run)
+	local wave = run.Wave
+	local count = (wave % BR.DoubleEvery == 0) and 2 or 1
+	local hp = BR.BaseHP * BR.HPGrowth ^ (wave - 1) / math.sqrt(count)
+	local color = waveColor(wave)
 	run.Paused = true
-	Net.FX(player, "Tower", { State = "Floor", Floor = floor, Color = color })
-	task.delay(1.5, function()
+	run.Bosses = {}
+	run.Alive = count
+	Net.FX(player, "Tower", { State = "Floor", Floor = wave, Color = color, Double = count > 1 })
+	task.delay(1.2, function()
 		if not run.Active or not player.Parent then
 			return
 		end
-		run.Guardian = EnemyService.Create({
-			Label = "FLOOR " .. floor .. " GUARDIAN",
-			LookIndex = ((floor - 1) % #Config.EnemyLooks) + 1,
-			Color = color,
-			Scale = 2,
-			HP = hp,
-			Boss = true,
-			Owner = player,
-			Position = run.Center + Vector3.new(0, 0, -14),
-			Min = run.Center - Vector3.new(ARENA_R - 4, 0, ARENA_R - 4),
-			Max = run.Center + Vector3.new(ARENA_R - 4, 0, ARENA_R - 4),
-			Speed = 12 + math.min(floor, 20) * 0.3,
-			HitPercent = 0.08,
-			OnDeath = function()
-				onWin(player, run)
-			end,
-		})
-		run.EndsAt = Stats.Now() + Config.Tower.TimeLimit
+		for k = 1, count do
+			local stageIndex = BOSS_STAGES[((wave + k - 2) % #BOSS_STAGES) + 1]
+			local stage = Config.Stages[stageIndex]
+			local boss = EnemyService.Create({
+				Label = "WAVE " .. wave .. ": " .. stage.Enemy,
+				LookIndex = stageIndex,
+				Color = color,
+				Scale = 2.2,
+				HP = hp,
+				Boss = true,
+				Owner = player,
+				Position = run.Center + Vector3.new((k - (count + 1) / 2) * 16, 0, -14),
+				Min = run.Center - Vector3.new(ARENA_R - 4, 0, ARENA_R - 4),
+				Max = run.Center + Vector3.new(ARENA_R - 4, 0, ARENA_R - 4),
+				Speed = 12 + math.min(wave, 25) * 0.3,
+				HitPercent = 0.06 + math.min(wave, 30) * 0.002,
+				OnDeath = function()
+					run.Alive -= 1
+					if run.Alive <= 0 then
+						onWaveCleared(player, run)
+					end
+				end,
+			})
+			table.insert(run.Bosses, boss)
+		end
+		run.EndsAt = Stats.Now() + BR.TimePerBoss * count
 		run.Paused = false
 		DataService.MarkDirty(player)
-		Net.FX(player, "Tower", { State = "Start", Floor = floor, EndsAt = run.EndsAt, Color = color })
+		Net.FX(player, "Tower", { State = "Start", Floor = wave, EndsAt = run.EndsAt, Color = color })
 	end)
 end
 
@@ -193,8 +214,8 @@ function TowerService.Start(player: Player)
 	if s.Tower then
 		return
 	end
-	if data.Power < Config.Tower.PowerReq then
-		Net.Notify(player, "The Tower needs " .. Format.Abbrev(Config.Tower.PowerReq) .. " Power. Train first!", Color3.fromRGB(255, 120, 90), "Error")
+	if data.Stage < BR.StageReq then
+		Net.Notify(player, "Boss Rush opens after you clear stage " .. BR.StageReq .. " on the Path.", Color3.fromRGB(255, 120, 90), "Error")
 		return
 	end
 	local slot = allocSlot()
@@ -203,14 +224,16 @@ function TowerService.Start(player: Player)
 		Slot = slot,
 		Arena = arena,
 		Center = center,
-		Floor = math.max(1, data.TowerBest - 2),
+		Wave = 1,
+		Bosses = {},
+		Alive = 0,
 		Active = true,
 		Paused = true,
 		EndsAt = 0,
 	}
 	s.Tower = run
-	Util.Teleport(player, CFrame.new(center + Vector3.new(0, 4, 20)), "Tower")
-	startFloor(player, run)
+	Util.Teleport(player, CFrame.new(center + Vector3.new(0, 4, 20)), "Boss Rush")
+	startWave(player, run)
 
 	task.spawn(function()
 		while run.Active do

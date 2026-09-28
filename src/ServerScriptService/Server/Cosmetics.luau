@@ -92,7 +92,7 @@ local function nametag(player: Player, char: Model, data)
 		return t
 	end
 	if isMC then
-		local title = line("MAIN CHARACTER", Color3.fromRGB(255, 220, 90), 20, Enum.Font.BuilderSansExtraBold, 0)
+		local title = line("MAIN CHARACTER", Color3.fromRGB(255, 220, 90), 20, Config.Fonts.Display, 0)
 		local g = Instance.new("UIGradient")
 		g.Color = ColorSequence.new({
 			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 240, 160)),
@@ -101,10 +101,10 @@ local function nametag(player: Player, char: Model, data)
 		})
 		g.Parent = title
 	end
-	line(player.DisplayName, Color3.new(1, 1, 1), 28, Enum.Font.BuilderSansBold, 1)
+	line(player.DisplayName, Color3.new(1, 1, 1), 28, Config.Fonts.Heading, 1)
 	if data.Race ~= "" then
 		local tierLabel = tier.Label or tier.Id
-		line(string.format("%s %s%s", tierLabel, race.Name, data.Rebirths > 0 and ("  |  R" .. data.Rebirths) or ""), tier.Id == "Common" and race.Color or tier.Color, 20, Enum.Font.BuilderSansMedium, 2)
+		line(string.format("%s %s%s", tierLabel, race.Name, data.Rebirths > 0 and ("  |  R" .. data.Rebirths) or ""), tier.Id == "Common" and race.Color or tier.Color, 20, Config.Fonts.Body, 2)
 	end
 end
 

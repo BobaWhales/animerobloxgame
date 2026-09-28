@@ -38,8 +38,8 @@ local lastStamina = nil
 local lastRewardIndex = 0
 local enemyCheck = 0
 
-local FONT = Enum.Font.BuilderSansBold
-local FONT_LIGHT = Enum.Font.BuilderSansMedium
+local FONT = Config.Fonts.Heading
+local FONT_LIGHT = Config.Fonts.Body
 
 local SLOTS = {
 	{ Slot = "LMB", Name = "Attack", Keys = { Keyboard = "LMB", Gamepad = "RT", Touch = "" }, Color = Color3.fromRGB(230, 230, 240) },

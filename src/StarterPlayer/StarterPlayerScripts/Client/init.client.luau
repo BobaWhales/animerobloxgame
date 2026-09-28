@@ -1,9 +1,9 @@
 --!nonstrict
 -- Client (LocalScript) -> StarterPlayer/StarterPlayerScripts/Client
--- Put the UI, Hud, WeaponUI, Abilities, PromptUI, Drops, WorldText,
--- WorldMap, EnemyFX, CameraDirector and Movement ModuleScripts INSIDE this
--- LocalScript. Handles server FX events, world VFX/SFX, gates, pads and
--- zones.
+-- Put the UI, Hud, WeaponUI, ForgeUI, AdminUI, Abilities, PromptUI, Drops,
+-- WorldText, WorldMap, EnemyFX, CameraDirector and Movement ModuleScripts
+-- INSIDE this LocalScript. Handles server FX events, world VFX/SFX, the Path
+-- gates, training pads and zones.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -23,6 +23,8 @@ local Drops = require(script:WaitForChild("Drops"))
 local Abilities = require(script:WaitForChild("Abilities"))
 local Hud = require(script:WaitForChild("Hud"))
 local WeaponUI = require(script:WaitForChild("WeaponUI"))
+local ForgeUI = require(script:WaitForChild("ForgeUI"))
+local AdminUI = require(script:WaitForChild("AdminUI"))
 local PromptUI = require(script:WaitForChild("PromptUI"))
 local WorldText = require(script:WaitForChild("WorldText"))
 local WorldMap = require(script:WaitForChild("WorldMap"))
@@ -46,6 +48,8 @@ VFX.Init()
 SFX.Init()
 UI.Init(request)
 WeaponUI.Init(UI, request)
+ForgeUI.Init(UI, request)
+AdminUI.Init(UI)
 Abilities.Init(AbilityRemote, request)
 Hud.Init(UI, Abilities)
 PromptUI.Init(InteractRemote)
@@ -98,7 +102,7 @@ player.CharacterAdded:Connect(function()
 end)
 
 ---------------------------------------------------------------------
--- GATES (opened locally when you meet the Power requirement)
+-- GATES (a stage's gate opens once the stage before it is cleared)
 ---------------------------------------------------------------------
 local function refreshGate(gate: BasePart)
 	if not data then
@@ -110,19 +114,28 @@ local function refreshGate(gate: BasePart)
 		return
 	end
 	local zone = Config.Zones[stage.Zone]
-	local open = data.Power >= stage.PowerReq and data.Blade >= (zone.BladeReq or 0)
+	local open = data.Stage >= stageIndex - 1
+	local label = gate:FindFirstChild("GateLabel")
+	if not open and label then
+		-- live kill counter on the next locked gate
+		local prev = Config.Stages[stageIndex - 1]
+		local text = "CLEAR STAGE " .. (stageIndex - 1)
+		if prev and data.Stage == stageIndex - 2 then
+			text ..= prev.Boss and "  -  DEFEAT THE BOSS" or ("  " .. math.min(data.StageKills or 0, prev.Kills) .. "/" .. prev.Kills)
+		end
+		WorldText.SetText(label, "Title", text)
+	end
 	if gate:GetAttribute("Open") == open then
 		return
 	end
 	gate:SetAttribute("Open", open)
 	gate.CanCollide = not open
-	gate.Transparency = open and 0.85 or 0.1
-	local label = gate:FindFirstChild("GateLabel")
-	if label then
-		WorldText.SetText(label, "Title", open and ("STAGE " .. stageIndex .. " - OPEN") or ("LOCKED - " .. Format.Abbrev(stage.PowerReq) .. " Power"))
+	gate.Transparency = open and 0.9 or 0.15
+	if label and open then
+		WorldText.SetText(label, "Title", (stage.Boss and "BOSS STAGE " or "STAGE ") .. stageIndex)
 	end
-	if open and stage.PowerReq > 0 and gate:GetAttribute("Seen") then
-		UI.Notify("Stage " .. stageIndex .. " unlocked!", zone.Accent)
+	if open and stageIndex > 1 and gate:GetAttribute("Seen") then
+		UI.Notify("Gate to stage " .. stageIndex .. " is open!", zone.Accent)
 		SFX.Play("Stage")
 	end
 	gate:SetAttribute("Seen", true)
@@ -156,7 +169,11 @@ end)
 ---------------------------------------------------------------------
 local FX = {}
 
-local SWING_SOUND = { Katana = "Swing", Greatsword = "HeavySwing", Scythe = "ScytheSwing", Glove = "Punch", Pistols = "GunShot", FingerGun = "SpiritShot" }
+local SWING_SOUND = {
+	Katana = "Swing", Greatsword = "HeavySwing", Scythe = "ScytheSwing", Glove = "Punch", Pistols = "GunShot", FingerGun = "SpiritShot",
+	Spear = "Swing", Daggers = "Swing", Hammer = "HeavySwing", Bow = "Swing", Staff = "SpiritShot", Chain = "ScytheSwing",
+	Claws = "Swing", Fan = "Swing", Kunai = "Swing", Cannon = "GunShot",
+}
 
 -- Basic attacks of OTHER players (yours are drawn instantly by Abilities).
 FX.Attack = function(p)
@@ -188,7 +205,11 @@ FX.Attack = function(p)
 end
 
 -- impact sound family per weapon class
-local HIT_SOUND = { Katana = "HitBlade", Scythe = "HitBlade", Greatsword = "HitBlunt", Glove = "HitBlunt", Pistols = "HitEnergy", FingerGun = "HitEnergy" }
+local HIT_SOUND = {
+	Katana = "HitBlade", Scythe = "HitBlade", Greatsword = "HitBlunt", Glove = "HitBlunt", Pistols = "HitEnergy", FingerGun = "HitEnergy",
+	Spear = "HitBlade", Daggers = "HitBlade", Hammer = "HitBlunt", Bow = "HitBlade", Staff = "HitEnergy", Chain = "HitBlade",
+	Claws = "HitBlade", Fan = "HitEnergy", Kunai = "HitBlade", Cannon = "HitEnergy",
+}
 local lastExposedPop = 0
 
 FX.Hit = function(p)
@@ -282,24 +303,24 @@ FX.Power = function(p)
 	end
 end
 
-FX.Forge = function(p)
+-- Forge crafting result: reveal the weapon (with its ore effects), then
+-- celebrate any Forge-level tier up.
+FX.ForgeResult = function(p)
+	ForgeUI.Clear()
 	UI.Bump("Blade")
-	local char = player.Character
+	SFX.Play("Forge")
+	local title = p.Recipe and (p.FirstRecipe and "NEW RECIPE DISCOVERED!" or "UNIQUE RECIPE!") or "FORGED!"
+	WeaponUI.Reveal(p.Weapon, p.Rarity, title, p.Effects)
 	if p.TierUp then
-		SFX.Play("ForgeTierUp")
-		VFX.ImpactFrame(bladeColor(), 1.3)
-		VFX.TitleCard("NEW BLADE TIER!", p.TierName .. " Blade  (+" .. Format.Abbrev(p.To) .. ")", bladeColor(), 2.2)
-		if char then
-			VFX.Transform(char, bladeColor(), false)
-		end
-	else
-		SFX.Play(p.Auto and "Milestone" or "Forge")
-		if not p.Auto then
-			VFX.TitleCard("+" .. Format.Abbrev(p.Gained) .. " BLADE", "Blade +" .. Format.Abbrev(p.From) .. "  ->  +" .. Format.Abbrev(p.To), Color3.fromRGB(255, 160, 60), 1.3)
-		end
-		if p.Milestone and char then
-			VFX.LevelBurst(char, bladeColor())
-		end
+		task.delay(3.2, function()
+			local char = player.Character
+			SFX.Play("ForgeTierUp")
+			VFX.ImpactFrame(bladeColor(), 1.1)
+			VFX.TitleCard("FORGE TIER UP!", p.TierName .. "  (Forge +" .. Format.Abbrev(p.To) .. ")", Color3.fromRGB(255, 160, 60), 2)
+			if char then
+				VFX.LevelBurst(char, Color3.fromRGB(255, 160, 60))
+			end
+		end)
 	end
 end
 
@@ -348,6 +369,25 @@ FX.Rebirth = function(p)
 	end
 end
 
+FX.Ascend = function(p)
+	local char = charOf(p.Player)
+	if not char then
+		return
+	end
+	local pink = Color3.fromRGB(255, 100, 185)
+	if p.Player == player then
+		SFX.Play("Rebirth")
+		VFX.ImpactFrame(pink, 1.5)
+		VFX.Transform(char, pink, true)
+		task.delay(0.6, function()
+			VFX.TitleCard("ASCENSION " .. p.Ascensions .. "!", "x" .. Config.Ascension.PowerMult .. " Power  x" .. Config.Ascension.CoinMult .. " Coins - forever", pink, 2.6)
+		end)
+	else
+		VFX.Transform(char, pink, false)
+		UI.Notify(p.Player.DisplayName .. " reached Ascension " .. p.Ascensions .. "!", pink)
+	end
+end
+
 FX.RaceRoll = function(p)
 	UI.RaceRoll(p.Race, p.Tier, p.Initial)
 end
@@ -389,7 +429,7 @@ FX.Discover = function(p)
 end
 
 FX.BossSpawn = function(p)
-	if currentZone ~= p.Zone then
+	if not p.Global and currentStage ~= p.Stage then
 		return
 	end
 	SFX.Play("BossSpawn")
@@ -443,27 +483,51 @@ FX.PlotArmor = function()
 	VFX.TitleCard("PLOT ARMOR!", "Main Characters don't go down that easy", Color3.fromRGB(255, 215, 80), 1.8)
 end
 
+-- Boss Rush waves
 FX.Tower = function(p)
 	if p.State == "Floor" then
 		UI.Tower("Floor", p.Floor, 0)
-		UI.Banner("FLOOR " .. p.Floor, "Get ready...", p.Color)
+		UI.Banner("WAVE " .. p.Floor, p.Double and "DOUBLE BOSS!" or "Get ready...", p.Color)
 		SFX.Play("TowerStart")
-		SFX.PlayMusic(Config.Music.Tower)
+		SFX.PlayMusic(Config.Music.BossRush)
 	elseif p.State == "Start" then
 		UI.Tower("Start", p.Floor, p.EndsAt)
-		VFX.TitleCard("FIGHT!", "Beat the Guardian in " .. Config.Tower.TimeLimit .. "s", p.Color, 1)
+		local secs = math.max(0, math.floor((p.EndsAt or 0) - workspace:GetServerTimeNow() + 0.5))
+		VFX.TitleCard("FIGHT!", "Defeat the boss in " .. secs .. "s", p.Color, 1)
 	elseif p.State == "Win" then
 		UI.Tower("Win", p.Floor, 0)
 		SFX.Play("TowerWin")
-		VFX.TitleCard("FLOOR " .. p.Floor .. " CLEARED!", p.Text, Color3.fromRGB(120, 255, 170), 2)
+		VFX.TitleCard("WAVE " .. p.Floor .. " CLEARED!", p.Text, Color3.fromRGB(120, 255, 170), 2)
 		UI.FlyToHud("Coins", nil, Color3.fromRGB(255, 210, 60), 8)
 	elseif p.State == "Lose" then
 		SFX.Play("TowerLose")
-		VFX.TitleCard("DEFEATED", "You reached floor " .. p.Floor, Color3.fromRGB(255, 90, 90), 2)
+		VFX.TitleCard("DEFEATED", "You reached wave " .. p.Floor .. "  (best " .. (p.Best or p.Floor) .. ")", Color3.fromRGB(255, 90, 90), 2)
 		task.delay(2, UI.Tower, nil)
+		SFX.PlayMusic(Config.Music.Hub)
 	else
 		UI.Tower(nil)
+		SFX.PlayMusic(Config.Music.Hub)
 	end
+end
+
+-- Path progress
+FX.StageKill = function(p)
+	local root = myRoot()
+	if root and p.Need and p.Need > 1 then
+		VFX.TextPop(root.Position + Vector3.new(0, 4, 0), p.Kills .. " / " .. p.Need, Color3.fromRGB(255, 215, 90), 0.7)
+	end
+end
+
+FX.StageCleared = function(p)
+	local stage = Config.Stages[p.Stage]
+	local zone = stage and Config.Zones[stage.Zone]
+	local color = zone and zone.Accent or Color3.fromRGB(120, 255, 170)
+	SFX.Play(p.Boss and "Milestone" or "Stage")
+	if p.Boss then
+		VFX.ImpactFrame(color, 1.3)
+	end
+	local nextStage = Config.Stages[p.Stage + 1]
+	VFX.TitleCard((p.Boss and "BOSS STAGE " or "STAGE ") .. p.Stage .. " CLEARED!", nextStage and ("The gate to stage " .. (p.Stage + 1) .. " is open") or "You conquered the Path!", color, 2)
 end
 
 FX.OpenPanel = function(p)
@@ -721,19 +785,70 @@ FX.Equipped = function(p)
 	end
 end
 
-FX.WeaponDrop = function(p)
+FX.ArmorDrop = function(p)
+	local def = Config.ArmorById[p.Armor]
 	local r = Config.WeaponRarityById[p.Rarity]
-	if r and r.Index >= 4 then
-		WeaponUI.Reveal(p.Weapon, p.Rarity, "WEAPON DROP!")
-	else
-		local def = Config.WeaponById[p.Weapon]
-		SFX.Play("RarePickup")
-		UI.Notify("Weapon drop: " .. (r and (r.Label or r.Id) or "") .. " " .. (def and def.Name or "?"), r and r.Color or nil)
+	if not def or not r then
+		return
+	end
+	SFX.Play("RarePickup")
+	if r.Index >= 4 then
+		VFX.ImpactFrame(r.Color, 0.9)
+		VFX.TitleCard("ARMOR DROP!", (r.Label or r.Id) .. " " .. def.Name, r.Color, 2)
+	end
+	UI.Notify("Armor drop: " .. (r.Label or r.Id) .. " " .. def.Name .. " - equip it from Armor", r.Color)
+end
+
+FX.ArmorEquipped = function(p)
+	SFX.Play("Equip")
+	local def = Config.ArmorById[p.Armor]
+	local r = Config.WeaponRarityById[p.Rarity]
+	if def and r then
+		UI.Notify("Wearing " .. def.Name .. " (" .. (r.Label or r.Id) .. ")", r.Color)
+	end
+	local char = player.Character
+	if char then
+		VFX.LevelBurst(char, r and r.Color or Color3.new(1, 1, 1))
 	end
 end
 
-FX.ChestResult = function(p)
-	WeaponUI.Reveal(p.Weapon, p.Rarity, Config.ChestById[p.Chest] and Config.ChestById[p.Chest].Name:upper() or "CHEST")
+-- Ore effect procs + shock chains
+FX.Proc = function(p)
+	local e = Config.Effects[p.Effect]
+	if e and p.Pos then
+		VFX.Emit(p.Pos, e.VFX or "Sparks", 8, e.Color)
+	end
+end
+
+FX.Chain = function(p)
+	VFX.Streak(p.From, p.To, p.Color or Color3.fromRGB(255, 235, 110), 0.5)
+	VFX.Emit(p.To, "Sparks", 6, p.Color or Color3.fromRGB(255, 235, 110))
+end
+
+-- Admin abuse
+FX.Event = function(p)
+	SFX.Play("Milestone")
+	VFX.ScreenFlash(p.Color, 0.5, 0.5)
+	VFX.TitleCard(p.Name .. "!", "Server event - " .. Format.Time(math.max(0, p.EndsAt - workspace:GetServerTimeNow())), p.Color, 2.4)
+end
+
+FX.Announce = function(p)
+	SFX.Play("Milestone")
+	VFX.TitleCard(p.Text, "- " .. (p.From or "Admin"), Color3.fromRGB(255, 90, 110), 4)
+	UI.Notify("[ADMIN] " .. p.Text, Color3.fromRGB(255, 90, 110))
+end
+
+FX.AdminAbuse = function(p)
+	local titles = { OreRain = { "ORE RAIN!", "Grab everything!", Color3.fromRGB(120, 200, 255) }, CoinRain = { "COIN RAIN!", "Free Coins for everyone!", Color3.fromRGB(255, 215, 70) } }
+	local t = titles[p.Kind]
+	if t then
+		SFX.Play("Milestone")
+		VFX.ImpactFrame(t[3], 1)
+		VFX.TitleCard(t[1], t[2], t[3], 2.2)
+		if p.Kind == "CoinRain" then
+			UI.FlyToHud("Coins", nil, t[3], 10)
+		end
+	end
 end
 
 FX.PlaytimeReward = function(p)
@@ -802,7 +917,7 @@ local function setZoneLook(zoneId: number)
 	if gameColor then
 		TweenService:Create(gameColor, TweenInfo.new(1.5), { TintColor = tint }):Play()
 	end
-	local music = zoneId == 0 and Config.Music.Hub or Config.Music["Zone" .. zoneId]
+	local music = zoneId == 0 and Config.Music.Hub or Config.Music.Path
 	SFX.PlayMusic(music)
 end
 
@@ -878,7 +993,9 @@ RunService.RenderStepped:Connect(function(dt)
 		local flat = Vector3.new(root.Position.X - p.Position.X, 0, root.Position.Z - p.Position.Z)
 		if flat.Magnitude <= Config.TrainPadRadius and math.abs(root.Position.Y - p.Position.Y) < 7 then
 			padMult = p:GetAttribute("Mult")
-			padLocked = data.Power < (p:GetAttribute("PowerReq") or 0) or data.Rebirths < (p:GetAttribute("RebirthReq") or 0)
+			local needA = p:GetAttribute("AscensionReq") or 0
+			local asc = data.Ascensions or 0
+			padLocked = if asc ~= needA then asc < needA else data.Rebirths < (p:GetAttribute("RebirthReq") or 0)
 			break
 		end
 	end
@@ -891,12 +1008,6 @@ RunService.RenderStepped:Connect(function(dt)
 			stageNow = room:GetAttribute("Stage") or 0
 			zoneNow = room:GetAttribute("Zone") or 0
 			break
-		end
-	end
-	if stageNow == 0 then
-		-- start area of a dungeon still counts as that zone
-		if root.Position.Z < -900 then
-			zoneNow = root.Position.X > 350 and 2 or 1
 		end
 	end
 	if zoneNow ~= currentZone then

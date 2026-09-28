@@ -17,6 +17,7 @@ local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("GameShared")
+local Config = require(Shared:WaitForChild("Config"))
 local VFX = require(Shared:WaitForChild("VFX"))
 
 local EnemyFX = {}
@@ -235,7 +236,7 @@ local function buildBossBar()
 	bossBar.AnchorPoint = Vector2.new(0.5, 0)
 	bossBar.Position = UDim2.new(0.5, 0, 0, 96)
 	bossBar.Parent = root
-	bossName = H.Text(bossBar, { Text = "", Font = Enum.Font.BuilderSansExtraBold, Size = UDim2.new(1, 0, 0, 16), Color = Color3.fromRGB(255, 200, 210) })
+	bossName = H.Text(bossBar, { Text = "", Font = Config.Fonts.Display, Size = UDim2.new(1, 0, 0, 16), Color = Color3.fromRGB(255, 200, 210) })
 	local bg = H.Frame(bossBar, { Color = Color3.fromRGB(10, 6, 14), Transparency = 0.4, Size = UDim2.new(1, 0, 0, 5), Position = UDim2.fromOffset(0, 22), Corner = 3 })
 	bossChip = H.Frame(bg, { Color = Color3.new(1, 1, 1), Transparency = 0.3, Size = UDim2.fromScale(1, 1), Corner = 3 })
 	bossFill = H.Frame(bg, { Color = Color3.fromRGB(255, 70, 100), Size = UDim2.fromScale(1, 1), Corner = 3, ZIndex = 2 })

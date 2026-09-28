@@ -25,6 +25,7 @@ Net.Interact = remote("Interact") -- client -> server: custom ProximityPrompt tr
 Net.Request = remote("Request") -- client -> server: (action, arg)
 Net.Sync = remote("Sync") -- server -> client: data snapshot
 Net.FXEvent = remote("FX") -- server -> client: (kind, payload)
+Net.Admin = remote("Admin") -- client -> server: admin panel commands (server re-checks admin)
 folder.Parent = ReplicatedStorage
 
 function Net.FX(player: Player, kind: string, payload)

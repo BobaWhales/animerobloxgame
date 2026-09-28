@@ -1,6 +1,11 @@
 --!nonstrict
 -- EnemyService (ModuleScript) -> ServerScriptService/Server/EnemyService
--- Anime avatar enemies:
+-- Anime avatar enemies on the Path:
+--   * Dressed from the Roblox catalog (like Catalog Avatar Creator): each
+--     stage searches AvatarEditorService for its theme keywords (hair, hat /
+--     mask, shirt, pants; Config.EnemyAvatars) and wears real items.
+--   * Stages only spawn enemies while a player is near (Config.StageSleepTime).
+--   * Killing enemies in your next stage counts toward opening its gate.
 --   * R15 rigs built from a HumanoidDescription (optional catalog hair /
 --     accessories / Shirt / Pants ids from Config.EnemyCatalog) plus
 --     procedural anime hair; falls back to a hand-built R6 rig if needed.
@@ -22,6 +27,7 @@
 --     model attributes and animated on each client.
 
 local Players = game:GetService("Players")
+local AvatarEditorService = game:GetService("AvatarEditorService")
 local CollectionService = game:GetService("CollectionService")
 local PathfindingService = game:GetService("PathfindingService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -151,7 +157,7 @@ end
 -- Silhouette + focal points + tier dressing. level = stage position inside
 -- its zone (1..StagesPerZone); boss looks get the full treatment.
 local STEEL = Color3.fromRGB(58, 62, 74)
-local function stylize(model: Model, look, level: number)
+local function stylize(model: Model, look, level: number, catalogLook: boolean?)
 	local head = model:FindFirstChild("Head") :: BasePart?
 	local torso = bodyPart(model, "UpperTorso", "Torso")
 	local lArm = bodyPart(model, "LeftUpperArm", "Left Arm")
@@ -166,18 +172,21 @@ local function stylize(model: Model, look, level: number)
 	local hs = head.Size
 	local u = ts.X / 2 -- body unit (about 1 stud at scale 1)
 
-	-- clean, flat materials (no busy textures)
-	for _, d in ipairs(model:GetDescendants()) do
-		if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" and d.Material ~= Enum.Material.Neon then
-			d.Material = Enum.Material.SmoothPlastic
-			d.Reflectance = 0
-		elseif d:IsA("Decal") and d.Name == "face" then
-			d:Destroy()
+	-- clean, flat materials (no busy textures) for procedural looks; catalog
+	-- avatars keep their real items and faces
+	if not catalogLook then
+		for _, d in ipairs(model:GetDescendants()) do
+			if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" and d.Material ~= Enum.Material.Neon then
+				d.Material = Enum.Material.SmoothPlastic
+				d.Reflectance = 0
+			elseif d:IsA("Decal") and d.Name == "face" then
+				d:Destroy()
+			end
 		end
 	end
 
-	-- glowing eyes (angled "anime glare" slits)
-	for _, side in ipairs({ -1, 1 }) do
+	-- glowing eyes (angled "anime glare" slits) - procedural looks only
+	for _, side in ipairs(catalogLook and {} or { -1, 1 }) do
 		local eye = piece(head, "Eye", Vector3.new(hs.X * 0.24, hs.Y * 0.075, hs.Z * 0.06), CFrame.new(side * hs.X * 0.2, hs.Y * 0.04, -hs.Z * 0.5) * CFrame.Angles(0, 0, math.rad(-side * 14)), core, nil, Enum.Material.Neon)
 		eye.CastShadow = false
 	end
@@ -198,7 +207,7 @@ local function stylize(model: Model, look, level: number)
 	local function shoulder(arm: BasePart, side: number, size: Vector3, color: Color3, shape: Enum.PartType?, name: string?)
 		return piece(arm, name or "Pauldron", size, CFrame.new(side * 0.1, arm.Size.Y * 0.38, 0), color, shape)
 	end
-	local sil = look.Silhouette
+	local sil = not catalogLook and look.Silhouette or nil
 	if sil == "Brawler" then
 		for _, pair in ipairs({ { lArm, -1 }, { rArm, 1 } }) do
 			shoulder(pair[1], pair[2], Vector3.new(u * 1.25, u * 0.85, u * 1.15), dark, Enum.PartType.Ball)
@@ -352,34 +361,102 @@ local function buildR6(look): Model
 	return m
 end
 
-local function buildTemplate(index: number): Model
-	local look = Config.EnemyLooks[index] or Config.EnemyLooks[1]
-	local catalog = Config.EnemyCatalog[index]
+-- Catalog search (cached): keyword -> list of asset ids.
+local catalogCache = {}
+local function catalogIds(keyword: string?, assetType: Enum.AvatarAssetType): { number }
+	if not keyword or keyword == "" then
+		return {}
+	end
+	local key = keyword .. "|" .. assetType.Name
+	if catalogCache[key] then
+		return catalogCache[key]
+	end
+	local ids = {}
+	local ok, err = pcall(function()
+		local params = CatalogSearchParams.new()
+		params.SearchKeyword = keyword
+		params.AssetTypes = { assetType }
+		params.IncludeOffSale = true
+		params.Limit = 30
+		local pages = AvatarEditorService:SearchCatalogAsync(params)
+		for _, item in ipairs(pages:GetCurrentPage()) do
+			local id = type(item) == "table" and tonumber(item.Id)
+			if id then
+				table.insert(ids, id)
+			end
+		end
+	end)
+	if not ok then
+		warn("[Enemies] catalog search failed for '" .. keyword .. "':", err)
+	end
+	catalogCache[key] = ids
+	return ids
+end
+
+local function pick(ids: { number }, seed: number): number?
+	if #ids == 0 then
+		return nil
+	end
+	return ids[(seed * 7) % #ids + 1]
+end
+
+-- Builds a HumanoidDescription from the catalog for a stage. Returns the
+-- description and whether real catalog items were found.
+local function catalogDescription(stageIndex: number)
+	local userId = Config.EnemyAvatarUserIds[stageIndex]
+	if userId then
+		local ok, desc = pcall(function()
+			return Players:GetHumanoidDescriptionFromUserIdAsync(userId)
+		end)
+		if ok and desc then
+			return desc, true
+		end
+	end
+	local avatar = Config.EnemyAvatars[stageIndex] or Config.EnemyAvatars[1]
+	local override = Config.EnemyCatalogOverrides[stageIndex] or {}
 	local desc = Instance.new("HumanoidDescription")
-	desc.HeadColor = look.Skin
-	desc.TorsoColor = look.Shirt
-	desc.LeftArmColor = look.Shirt
-	desc.RightArmColor = look.Shirt
-	desc.LeftLegColor = look.Pants
-	desc.RightLegColor = look.Pants
-	local catalogHair = false
-	if catalog then
-		if catalog.HairAccessory and catalog.HairAccessory ~= "" then
-			desc.HairAccessory = catalog.HairAccessory
-			catalogHair = true
+	local skin = avatar.Skin
+	desc.HeadColor, desc.TorsoColor, desc.LeftArmColor, desc.RightArmColor, desc.LeftLegColor, desc.RightLegColor = skin, skin, skin, skin, skin, skin
+	local found = false
+	local hair = override.HairAccessory or pick(catalogIds(avatar.Hair, Enum.AvatarAssetType.HairAccessory), stageIndex)
+	if hair and hair ~= "" then
+		desc.HairAccessory = tostring(hair)
+		found = true
+	end
+	local hat = override.HatAccessory or pick(catalogIds(avatar.Hat, Enum.AvatarAssetType.Hat), stageIndex)
+	if hat and hat ~= "" then
+		desc.HatAccessory = tostring(hat)
+	else
+		local face = override.FaceAccessory or pick(catalogIds(avatar.Hat, Enum.AvatarAssetType.FaceAccessory), stageIndex)
+		if face and face ~= "" then
+			desc.FaceAccessory = tostring(face)
 		end
-		if catalog.HatAccessory and catalog.HatAccessory ~= "" then
-			desc.HatAccessory = catalog.HatAccessory
-		end
-		if catalog.Shirt and catalog.Shirt ~= 0 then
-			desc.Shirt = catalog.Shirt
-		end
-		if catalog.Pants and catalog.Pants ~= 0 then
-			desc.Pants = catalog.Pants
-		end
-		if catalog.Face and catalog.Face ~= 0 then
-			desc.Face = catalog.Face
-		end
+	end
+	local shirt = override.Shirt or pick(catalogIds(avatar.Shirt, Enum.AvatarAssetType.Shirt), stageIndex)
+	if shirt and shirt ~= 0 then
+		desc.Shirt = shirt
+		found = true
+	end
+	local pants = override.Pants or pick(catalogIds(avatar.Pants, Enum.AvatarAssetType.Pants), stageIndex)
+	if pants and pants ~= 0 then
+		desc.Pants = pants
+	end
+	if override.Face and override.Face ~= 0 then
+		desc.Face = override.Face
+	end
+	return desc, found
+end
+
+local function buildTemplate(stageIndex: number): Model
+	local look = Config.EnemyLooks[((stageIndex - 1) % #Config.EnemyLooks) + 1]
+	local desc, catalogLook = catalogDescription(stageIndex)
+	if not catalogLook then
+		desc.HeadColor = look.Skin
+		desc.TorsoColor = look.Shirt
+		desc.LeftArmColor = look.Shirt
+		desc.RightArmColor = look.Shirt
+		desc.LeftLegColor = look.Pants
+		desc.RightLegColor = look.Pants
 	end
 	local ok, model = pcall(function()
 		return Players:CreateHumanoidModelFromDescriptionAsync(desc, Enum.HumanoidRigType.R15)
@@ -387,20 +464,23 @@ local function buildTemplate(index: number): Model
 	if not ok or not model then
 		warn("[Enemies] R15 rig build failed, using R6 fallback:", model)
 		model = buildR6(look)
+		catalogLook = false
 	end
 	for _, d in ipairs(model:GetDescendants()) do
 		if d:IsA("Script") or d:IsA("LocalScript") then
 			d:Destroy()
-		elseif d:IsA("BasePart") and (d.Name == "LeftHand" or d.Name == "RightHand") then
+		elseif not catalogLook and d:IsA("BasePart") and (d.Name == "LeftHand" or d.Name == "RightHand") then
 			d.Color = look.Skin
 		end
 	end
-	if not catalogHair then
+	if not catalogLook then
 		decorate(model, look)
 	end
-	local level = ((index - 1) % Config.StagesPerZone) + 1
-	stylize(model, look, level)
-	model:SetAttribute("CoreColor", look.Core or Color3.fromRGB(255, 80, 80))
+	local stage = Config.Stages[stageIndex]
+	local level = stage and (stage.Boss and Config.StagesPerZone or ((stageIndex - 1) % Config.StagesPerZone) + 1) or 3
+	local coreColor = stage and stage.Color or look.Core
+	stylize(model, { Core = coreColor, Silhouette = look.Silhouette }, level, catalogLook)
+	model:SetAttribute("CoreColor", coreColor)
 	return model
 end
 
@@ -518,20 +598,30 @@ end
 -- SPAWNING
 ---------------------------------------------------------------------
 local function randomPoint(minV: Vector3, maxV: Vector3): Vector3
-	return Vector3.new(math.random() * (maxV.X - minV.X) + minV.X, 0, math.random() * (maxV.Z - minV.Z) + minV.Z)
+	return Vector3.new(math.random() * (maxV.X - minV.X) + minV.X, minV.Y, math.random() * (maxV.Z - minV.Z) + minV.Z)
 end
 
 local function tierKey(e): string
 	return e.Boss and "Boss" or (e.Elite and "Elite" or "Normal")
 end
 
-function EnemyService.Create(opts)
-	local lookIndex = opts.LookIndex or 1
-	local template = templates[lookIndex]
-	if not template then
-		template = buildTemplate(lookIndex)
-		templates[lookIndex] = template
+local building = {}
+local function templateFor(stageIndex: number): Model
+	while building[stageIndex] do
+		task.wait(0.1)
 	end
+	local template = templates[stageIndex]
+	if not template then
+		building[stageIndex] = true
+		template = buildTemplate(stageIndex)
+		templates[stageIndex] = template
+		building[stageIndex] = nil
+	end
+	return template
+end
+
+function EnemyService.Create(opts)
+	local template = templateFor(opts.LookIndex or 1)
 	local model = template:Clone()
 	model.Name = opts.Label
 	if opts.Elite then
@@ -624,6 +714,8 @@ function EnemyService.Create(opts)
 		NextPath = 0,
 		RecoverUntil = 0,
 		PoseId = 0,
+		BaseSpeed = opts.Speed or 12,
+		SlowUntil = 0,
 	}
 	enemy.Tracks = loadTracks(hum)
 	if enemy.Tracks.Idle then
@@ -651,10 +743,13 @@ function EnemyService.Create(opts)
 	return enemy
 end
 
+local stageState = {} -- [stageIndex] = { Active, LastNear, Enemies = {} }
+
 local function spawnForStage(stageIndex: number, announce: boolean?)
 	local stage = Config.Stages[stageIndex]
-	local info = map.Dungeons[stage.Zone] and map.Dungeons[stage.Zone].Stages[stageIndex]
-	if not info then
+	local info = map.Path and map.Path.Stages[stageIndex]
+	local st = stageState[stageIndex]
+	if not info or not st or not st.Active then
 		return
 	end
 	local elite = not stage.Boss and math.random() < Config.EliteChance
@@ -674,6 +769,17 @@ local function spawnForStage(stageIndex: number, announce: boolean?)
 		Max = info.SpawnMax,
 		Speed = stage.Boss and 13 or (elite and 15 or 12),
 	})
+	if not st.Active then
+		-- the stage went to sleep while the rig was building
+		enemy.Dead = true
+		local idx = table.find(EnemyService.Active, enemy)
+		if idx then
+			table.remove(EnemyService.Active, idx)
+		end
+		enemy.Model:Destroy()
+		return nil
+	end
+	st.Enemies[enemy] = true
 	if stage.Boss and announce then
 		Net.FXAll("BossSpawn", { Name = stage.Enemy, Stage = stageIndex, Zone = stage.Zone, Pos = pos, Color = stage.Color })
 	end
@@ -753,6 +859,28 @@ function EnemyService.Stun(e, duration: number)
 	end
 end
 
+-- Frost: half speed for a moment; chilled enemies take +25% damage.
+function EnemyService.Slow(e, duration: number)
+	if e.Dead then
+		return
+	end
+	local fresh = os.clock() >= e.SlowUntil
+	e.SlowUntil = math.max(e.SlowUntil, os.clock() + duration)
+	e.Humanoid.WalkSpeed = e.BaseSpeed * 0.5
+	e.Model:SetAttribute("Chilled", true)
+	if fresh then
+		task.spawn(function()
+			while not e.Dead and os.clock() < e.SlowUntil do
+				task.wait(0.2)
+			end
+			if not e.Dead and e.Humanoid.Parent then
+				e.Humanoid.WalkSpeed = e.BaseSpeed
+				e.Model:SetAttribute("Chilled", nil)
+			end
+		end)
+	end
+end
+
 function EnemyService.Knockback(e, dir: Vector3, force: number)
 	if e.Dead then
 		return
@@ -829,7 +957,7 @@ end
 ---------------------------------------------------------------------
 -- PLAYER DAMAGE (race passives: dodge, plot armor, zenkai; stun cap)
 ---------------------------------------------------------------------
-function EnemyService.HitPlayer(player: Player, fraction: number, attackerPos: Vector3?, stun: number?)
+function EnemyService.HitPlayer(player: Player, fraction: number, attackerPos: Vector3?, stun: number?, attacker)
 	local char = player.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
 	local data = DataService.Get(player)
@@ -837,13 +965,25 @@ function EnemyService.HitPlayer(player: Player, fraction: number, attackerPos: V
 	if not hum or hum.Health <= 0 or not data or not s then
 		return
 	end
+	if s.God then
+		return
+	end
 	local now = Stats.Now()
 	if s.InvulnUntil > now then
 		Net.FX(player, "Dodge", {})
 		return
 	end
+	-- armour: dodge chance, then damage reduction, then thorns
+	if math.random() < Stats.ArmorBonus(player, "Dodge") then
+		Net.FX(player, "Dodge", {})
+		return
+	end
 	local race = Stats.Race(data)
-	local dmg = hum.MaxHealth * fraction
+	local dmg = hum.MaxHealth * fraction * (1 - Stats.Defense(player))
+	local thorns = Stats.ArmorBonus(player, "Thorns")
+	if thorns > 0 and attacker and not attacker.Dead then
+		EnemyService.Damage(attacker, player, Stats.Damage(player) * thorns, false)
+	end
 	local newHealth = hum.Health - dmg
 	if newHealth <= 0 and race.PlotArmor and math.random() < race.PlotArmor then
 		newHealth = 1
@@ -870,13 +1010,31 @@ end
 ---------------------------------------------------------------------
 -- DAMAGE / DEATH / REWARDS
 ---------------------------------------------------------------------
-local function weaponDrop(player: Player, chance: number)
-	if math.random() >= chance then
+-- Armour is the rare gear drop (weapons come from the Forge).
+local function gearDrop(player: Player, chance: number)
+	if math.random() >= chance * Stats.EventMult("Drops") then
 		return
 	end
-	local weaponId, rarityId = Weapons.Roll(nil, Stats.Luck(player))
-	if Weapons.Add(player, weaponId, rarityId) then
-		Net.FX(player, "WeaponDrop", { Weapon = weaponId, Rarity = rarityId })
+	local armorId, rarityId = Weapons.RollArmor(Stats.Luck(player))
+	if Weapons.AddArmor(player, armorId, rarityId) then
+		Net.FX(player, "ArmorDrop", { Armor = armorId, Rarity = rarityId })
+	end
+end
+
+-- Kills in your next locked-in stage count toward opening its gate.
+local function stageProgress(player: Player, data, enemy)
+	local stageIndex = enemy.StageIndex
+	if not stageIndex or enemy.Owner or stageIndex ~= data.Stage + 1 then
+		return
+	end
+	local stage = Config.Stages[stageIndex]
+	data.StageKills += 1
+	if data.StageKills >= stage.Kills then
+		data.Stage = stageIndex
+		data.StageKills = 0
+		Net.FX(player, "StageCleared", { Stage = stageIndex, Boss = stage.Boss, Name = stage.Enemy })
+	else
+		Net.FX(player, "StageKill", { Stage = stageIndex, Kills = data.StageKills, Need = stage.Kills })
 	end
 end
 
@@ -894,6 +1052,7 @@ local function reward(player: Player, enemy)
 	local coins = math.floor(stage.Coins * mult * Stats.CoinMult(player))
 	data.Coins += coins
 	data.Kills += 1
+	stageProgress(player, data, enemy)
 	local luck = Stats.Luck(player) * (enemy.Elite and 2 or 1)
 	local count
 	if enemy.Boss then
@@ -903,6 +1062,7 @@ local function reward(player: Player, enemy)
 	else
 		count = (math.random() < 0.25) and 2 or 1
 	end
+	count = math.floor(count * Stats.EventMult("Drops"))
 	local pos = enemy.Root.Position
 	for i = 1, count do
 		local minOrder = (enemy.Boss and i == 1) and 4 or nil
@@ -914,14 +1074,18 @@ local function reward(player: Player, enemy)
 		data.Rerolls += 1
 		Net.Notify(player, "The boss dropped a Race Reroll!", Color3.fromRGB(200, 150, 255), "RarePickup")
 	end
-	weaponDrop(player, enemy.Boss and Config.WeaponDropChance.Boss or (enemy.Elite and Config.WeaponDropChance.Elite or Config.WeaponDropChance.Normal))
+	gearDrop(player, enemy.Boss and Config.ArmorDropChance.Boss or (enemy.Elite and Config.ArmorDropChance.Elite or Config.ArmorDropChance.Normal))
+	if enemy.Boss and math.random() < 0.35 then
+		data.Keys.RareScroll = (data.Keys.RareScroll or 0) + 1
+		Net.Notify(player, "The boss dropped a Rare+ Catalyst!", Color3.fromRGB(70, 160, 255), "RarePickup")
+	end
 	if Stats.Race(data).Id == "Ninja" then
 		s.InvulnUntil = math.max(s.InvulnUntil, Stats.Now() + Config.NinjaDodgeTime)
 	end
 	Net.FX(player, "Reward", { Coins = coins, Pos = pos })
 	DataService.MarkDirty(player)
 end
-EnemyService.WeaponDrop = weaponDrop
+EnemyService.GearDrop = gearDrop
 
 function EnemyService.Kill(enemy, killer: Player?)
 	if enemy.Dead then
@@ -952,8 +1116,21 @@ function EnemyService.Kill(enemy, killer: Player?)
 		enemy.Model:Destroy()
 	end)
 	if enemy.StageIndex and not enemy.Owner then
+		local st = stageState[enemy.StageIndex]
+		if st then
+			st.Enemies[enemy] = nil
+		end
 		local stage = Config.Stages[enemy.StageIndex]
-		task.delay(stage.Boss and Config.BossRespawn or Config.EnemyRespawn, spawnForStage, enemy.StageIndex, true)
+		task.delay(stage.Boss and Config.BossRespawn or Config.EnemyRespawn, function()
+			local s2 = stageState[enemy.StageIndex]
+			local alive = 0
+			for _ in pairs(s2 and s2.Enemies or {}) do
+				alive += 1
+			end
+			if s2 and s2.Active and alive < stage.Count then
+				spawnForStage(enemy.StageIndex, true)
+			end
+		end)
 	end
 end
 
@@ -965,6 +1142,9 @@ function EnemyService.Damage(enemy, player: Player, amount: number, crit: boolea
 	local exposed = os.clock() < enemy.RecoverUntil
 	if exposed then
 		amount *= AI.RecoverDamageMult
+	end
+	if os.clock() < (enemy.SlowUntil or 0) then
+		amount *= 1.25
 	end
 	amount = math.max(1, math.floor(amount))
 	enemy.HP -= amount
@@ -1099,7 +1279,7 @@ local function basicAttack(e, target)
 		if not e.Dead and not e.Ragdolled and os.clock() >= e.StunnedUntil and target.Root.Parent then
 			local reach = Config.EnemyAttackRange + e.Radius
 			if (target.Root.Position - e.Root.Position).Magnitude <= reach * 1.2 then
-				EnemyService.HitPlayer(target.Player, e.HitPercent, e.Root.Position)
+				EnemyService.HitPlayer(target.Player, e.HitPercent, e.Root.Position, nil, e)
 			end
 		end
 		if e.Dead then
@@ -1175,7 +1355,7 @@ local function specialAttack(e, target)
 			for _, pr in ipairs(playerRoots()) do
 				local d = Vector3.new(pr.Root.Position.X - slamAt.X, 0, pr.Root.Position.Z - slamAt.Z).Magnitude
 				if d <= radius and (not e.Owner or e.Owner == pr.Player) then
-					EnemyService.HitPlayer(pr.Player, pct, slamAt, 0.6)
+					EnemyService.HitPlayer(pr.Player, pct, slamAt, 0.6, e)
 				end
 			end
 		else
@@ -1186,7 +1366,7 @@ local function specialAttack(e, target)
 				local ab = finish - start
 				local tt = math.clamp((p - start):Dot(ab) / ab:Dot(ab), 0, 1)
 				if (p - (start + ab * tt)).Magnitude <= 4.5 and (not e.Owner or e.Owner == pr.Player) then
-					EnemyService.HitPlayer(pr.Player, pct, start, 0.3)
+					EnemyService.HitPlayer(pr.Player, pct, start, 0.3, e)
 				end
 			end
 		end
@@ -1237,7 +1417,7 @@ local function stepAI()
 					e.State = "Idle"
 					if t >= e.NextWander then
 						e.NextWander = t + 2 + math.random() * 3
-						e.Humanoid:MoveTo(e.Boss and e.Home or (randomPoint(e.Min, e.Max) + Vector3.new(0, e.Home.Y, 0)))
+						e.Humanoid:MoveTo(e.Boss and e.Home or randomPoint(e.Min, e.Max))
 					end
 				end
 			end
@@ -1245,19 +1425,80 @@ local function stepAI()
 	end
 end
 
-function EnemyService.Init(m)
-	map = m
-	-- build one rig template per look (yields while the rigs load)
-	for i in pairs(Config.EnemyLooks) do
-		templates[i] = buildTemplate(i)
-	end
-	for stageIndex, stage in ipairs(Config.Stages) do
-		if map.Dungeons[stage.Zone] then
-			for _ = 1, stage.Count do
-				spawnForStage(stageIndex, false)
-			end
+-- Wake a stage when a player is within its bounds (+ a margin) and put it
+-- to sleep after Config.StageSleepTime with nobody near. Keeps the server
+-- light even with 30 stages of humanoid enemies.
+local function stageNear(stageIndex: number, roots): boolean
+	local zStart, zEnd = Config.StageBounds(stageIndex)
+	for _, pr in ipairs(roots) do
+		local p = pr.Root.Position
+		if math.abs(p.X) < 150 and p.Z <= zStart + 70 and p.Z >= zEnd - 70 and p.Y < 200 then
+			return true
 		end
 	end
+	return false
+end
+
+local function wake(stageIndex: number)
+	local st = stageState[stageIndex]
+	st.Active = true
+	local stage = Config.Stages[stageIndex]
+	for _ = 1, stage.Count do
+		task.spawn(spawnForStage, stageIndex, false)
+	end
+end
+
+local function sleep(stageIndex: number)
+	local st = stageState[stageIndex]
+	st.Active = false
+	for enemy in pairs(st.Enemies) do
+		enemy.Dead = true
+		local idx = table.find(EnemyService.Active, enemy)
+		if idx then
+			table.remove(EnemyService.Active, idx)
+		end
+		enemy.Model:Destroy()
+	end
+	table.clear(st.Enemies)
+end
+
+-- Clears every living enemy (admin); stages refill when players are near.
+function EnemyService.KillAll(byPlayer: Player?)
+	for _, e in ipairs(table.clone(EnemyService.Active)) do
+		if not e.Dead and not e.Owner then
+			EnemyService.Kill(e, byPlayer)
+		end
+	end
+end
+
+function EnemyService.Init(m)
+	map = m
+	for i in ipairs(Config.Stages) do
+		stageState[i] = { Active = false, LastNear = 0, Enemies = {} }
+	end
+	-- pre-build the first few rigs (catalog lookups yield)
+	task.spawn(function()
+		for i = 1, math.min(3, #Config.Stages) do
+			templateFor(i)
+		end
+	end)
+	task.spawn(function()
+		while true do
+			task.wait(1)
+			local roots = playerRoots()
+			local t = os.clock()
+			for i, st in ipairs(stageState) do
+				if stageNear(i, roots) then
+					st.LastNear = t
+					if not st.Active then
+						wake(i)
+					end
+				elseif st.Active and t - st.LastNear > Config.StageSleepTime then
+					sleep(i)
+				end
+			end
+		end
+	end)
 	task.spawn(function()
 		while true do
 			task.wait(0.15)

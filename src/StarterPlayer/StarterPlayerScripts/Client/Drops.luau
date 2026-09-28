@@ -1,8 +1,11 @@
 --!nonstrict
 -- Drops (ModuleScript) -> StarterPlayer/StarterPlayerScripts/Client/Drops
 -- Client-rendered ore drops: pop out of the enemy, bob and glow (loot beams
--- for Epic+), magnet into the player when close, server-validated pickup.
+-- for Epic+). Walk up and press F (the interact prompt) to pick them up -
+-- one press grabs every ore within reach. Server-validated; the Auto-Collect
+-- gamepass skips the prompt.
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("GameShared")
@@ -15,6 +18,41 @@ Drops.OnPickup = nil :: ((string, Vector3) -> ())?
 
 local items = {}
 local request: (string, any?) -> () = function() end
+
+-- Pick up every idle drop within reach of the player.
+local function collectNearby(root: BasePart?)
+	if not root then
+		return
+	end
+	local t = os.clock()
+	for _, it in ipairs(items) do
+		if it.State == "Idle" and it.Id and (root.Position - it.Gem.Position).Magnitude <= Config.PickupRadius + 2 then
+			it.State = "Pending"
+			it.NextTry = t + 1.5
+			request("Collect", it.Id)
+		end
+	end
+end
+
+local function addPrompt(it)
+	local pp = Instance.new("ProximityPrompt")
+	pp.Name = "PickupPrompt"
+	pp.ActionText = "Pick up"
+	pp.ObjectText = it.Ore.Name
+	pp.HoldDuration = 0
+	pp.MaxActivationDistance = Config.PickupRadius
+	pp.RequiresLineOfSight = false
+	pp.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
+	pp.Style = Enum.ProximityPromptStyle.Custom -- drawn by Client/PromptUI
+	pp.KeyboardKeyCode = Enum.KeyCode.F
+	pp.GamepadKeyCode = Enum.KeyCode.DPadUp
+	pp.Parent = it.Gem
+	pp.Triggered:Connect(function()
+		local char = Players.LocalPlayer.Character
+		collectNearby(char and char:FindFirstChild("HumanoidRootPart") :: BasePart?)
+	end)
+	it.Prompt = pp
+end
 
 local function makeGem(ore)
 	local order = ore.Order
@@ -63,7 +101,7 @@ local function makeGem(ore)
 			local t = Instance.new("TextLabel")
 			t.BackgroundTransparency = 1
 			t.Size = UDim2.fromScale(1, 1)
-			t.Font = Enum.Font.BuilderSansBold
+			t.Font = Config.Fonts.Heading
 			t.TextScaled = true
 			t.Text = ore.Name
 			t.TextColor3 = ore.Color:Lerp(Color3.new(1, 1, 1), 0.2)
@@ -165,6 +203,9 @@ function Drops.Step(dt: number, root: BasePart?)
 				it.T = 0
 				it.FlyFrom = it.Gem.Position
 				VFX.Emit(it.Land, "Sparks", 6, it.Ore.Color)
+				if not it.Auto and it.Id then
+					addPrompt(it)
+				end
 			end
 		elseif it.State == "Idle" or it.State == "Pending" then
 			local pos = it.Land + Vector3.new(0, 0.9 + math.sin(t * 3 + it.Spin) * 0.35, 0)
@@ -172,17 +213,20 @@ function Drops.Step(dt: number, root: BasePart?)
 			if it.Beam then
 				it.Beam.CFrame = CFrame.new(it.Land)
 			end
-			if it.State == "Idle" and root and it.Id and t >= it.NextTry and (root.Position - pos).Magnitude <= Config.PickupRadius then
-				it.State = "Pending"
-				it.NextTry = t + 1.5
-				request("Collect", it.Id)
-			elseif it.State == "Pending" and t >= it.NextTry then
+			if it.Prompt then
+				it.Prompt.Enabled = it.State == "Idle" and t >= it.NextTry
+			end
+			if it.State == "Pending" and t >= it.NextTry then
 				it.State = "Idle"
 			end
 			if t > it.Expire then
 				remove = true
 			end
 		elseif it.State == "Fly" then
+			if it.Prompt then
+				it.Prompt:Destroy()
+				it.Prompt = nil
+			end
 			if it.Beam then
 				it.Beam:Destroy()
 				it.Beam = nil

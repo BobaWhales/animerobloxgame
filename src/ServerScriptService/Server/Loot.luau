@@ -1,6 +1,7 @@
 --!nonstrict
 -- Loot (ModuleScript) -> ServerScriptService/Server/Loot
--- Ore rolls, drops, pickup, backpack, forging and selling.
+-- Ore rolls, drops, pickup (interact with the F prompt), ore bag and selling.
+-- Ore is turned into weapons at the Forge (see Forge.luau).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -11,7 +12,6 @@ local Format = require(Shared:WaitForChild("Format"))
 local DataService = require(script.Parent:WaitForChild("DataService"))
 local Stats = require(script.Parent:WaitForChild("Stats"))
 local Net = require(script.Parent:WaitForChild("Net"))
-local Weapons = require(script.Parent:WaitForChild("Weapons"))
 
 local Loot = {}
 
@@ -63,75 +63,26 @@ local function discover(player: Player, data, oreId: string)
 end
 
 ---------------------------------------------------------------------
--- ADD ORE (backpack / auto-forge)
+-- ADD ORE (bag / auto-sell)
 ---------------------------------------------------------------------
-function Loot.Forge(player: Player, oreId: string?, silent: boolean?): number
-	local data = DataService.Get(player)
-	if not data then
-		return 0
-	end
-	local gained = 0
-	local used = {}
-	local mult = Stats.ForgeMult(player)
-	for id, count in pairs(data.Backpack) do
-		if count > 0 and (oreId == nil or oreId == id) then
-			local ore = Config.OreById[id]
-			if ore then
-				gained += ore.Forge * count
-				used[id] = count
-			end
-			data.Backpack[id] = nil
-		end
-	end
-	if gained <= 0 then
-		return 0
-	end
-	gained = math.max(1, math.floor(gained * mult))
-	local before = data.Blade
-	data.Blade += gained
-	local _, tierBefore = Config.GetBladeTier(before)
-	local tier, tierAfter = Config.GetBladeTier(data.Blade)
-	Weapons.Refresh(player)
-	DataService.MarkDirty(player)
-	if not silent then
-		Net.FX(player, "Forge", {
-			Gained = gained,
-			From = before,
-			To = data.Blade,
-			Ores = used,
-			TierUp = tierAfter > tierBefore and tierAfter or nil,
-			TierName = tier.Name,
-			Milestone = math.floor(data.Blade / 10) > math.floor(before / 10),
-		})
-		Net.FXAll("ForgeBurst", { Player = player })
-	end
-	return gained
-end
-
 function Loot.AddOre(player: Player, oreId: string, count: number): boolean
 	local data = DataService.Get(player)
-	if not data then
+	if not data or not Config.OreById[oreId] then
 		return false
 	end
 	count = count or 1
 	discover(player, data, oreId)
-	if Stats.HasPass(player, "AutoForge") then
-		local ore = Config.OreById[oreId]
-		local before = data.Blade
-		local gained = math.max(1, math.floor(ore.Forge * count * Stats.ForgeMult(player)))
-		data.Blade += gained
-		local _, tb = Config.GetBladeTier(before)
-		local tier, ta = Config.GetBladeTier(data.Blade)
-		if ta > tb or math.floor(data.Blade / 10) > math.floor(before / 10) then
-			Weapons.Refresh(player)
-			Net.FX(player, "Forge", { Gained = gained, From = before, To = data.Blade, Ores = { [oreId] = count }, TierUp = ta > tb and ta or nil, TierName = tier.Name, Milestone = true, Auto = true })
-		end
-		DataService.MarkDirty(player)
-		return true
-	end
 	local max = Stats.BackpackMax(player)
 	local have = Stats.BackpackCount(data)
 	if have >= max then
+		-- Auto-Sell gamepass: a full bag sells new ore on the spot
+		if Stats.HasPass(player, "AutoSell") then
+			local ore = Config.OreById[oreId]
+			local coins = math.floor(ore.Sell * count * Stats.CoinMult(player))
+			data.Coins += coins
+			DataService.MarkDirty(player)
+			return true
+		end
 		return false
 	end
 	data.Backpack[oreId] = (data.Backpack[oreId] or 0) + math.min(count, max - have)
@@ -165,7 +116,7 @@ function Loot.NotifyFull(player: Player)
 	local s = DataService.Session(player)
 	if s and os.clock() - s.LastFullNotify > 3 then
 		s.LastFullNotify = os.clock()
-		Net.Notify(player, "Backpack full! Forge or Sell your ore in the Hub.", Color3.fromRGB(255, 120, 90), "Error")
+		Net.Notify(player, "Ore bag full! Forge weapons or sell ore at spawn (or upgrade your bag).", Color3.fromRGB(255, 120, 90), "Error")
 	end
 end
 
@@ -180,7 +131,7 @@ function Loot.Collect(player: Player, id: number)
 	end
 	local char = player.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
-	if not root or (root.Position - drop.Pos).Magnitude > Config.PickupRadius + 14 then
+	if not root or (root.Position - drop.Pos).Magnitude > Config.PickupRadius + 8 then
 		Net.FX(player, "CollectFail", { Id = id })
 		return
 	end

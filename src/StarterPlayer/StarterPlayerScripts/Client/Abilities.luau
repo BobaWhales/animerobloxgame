@@ -22,6 +22,10 @@ local VFX = require(Shared:WaitForChild("VFX"))
 local SFX = require(Shared:WaitForChild("SFX"))
 
 local Abilities = {}
+-- classes aimed with an outstretched arm, and classes without the two-hand
+-- sword-hold idle pose
+local POINT = { FingerGun = true, Bow = true, Cannon = true, Staff = true, Kunai = true }
+local NO_HOLD = { Glove = true, FingerGun = true, Claws = true, Cannon = true, Kunai = true }
 Abilities.CooldownEnds = { LMB = 0, Q = 0, E = 0, R = 0, C = 0 }
 Abilities.CooldownLength = { LMB = 1, Q = 1, E = 1, R = 1, C = 1 }
 Abilities.OnFeedback = nil :: ((string) -> ())? -- "NoStamina", ...
@@ -36,7 +40,11 @@ local combo = 0
 local charging = nil -- { Slot, Orb, Start }
 local B = Config.Balance
 
-local SWING_SOUND = { Katana = "Swing", Greatsword = "HeavySwing", Scythe = "ScytheSwing", Glove = "Punch", Pistols = "GunShot", FingerGun = "SpiritShot" }
+local SWING_SOUND = {
+	Katana = "Swing", Greatsword = "HeavySwing", Scythe = "ScytheSwing", Glove = "Punch", Pistols = "GunShot", FingerGun = "SpiritShot",
+	Spear = "Swing", Daggers = "Swing", Hammer = "HeavySwing", Bow = "Swing", Staff = "SpiritShot", Chain = "ScytheSwing",
+	Claws = "Swing", Fan = "Swing", Kunai = "Swing", Cannon = "GunShot",
+}
 
 ---------------------------------------------------------------------
 -- helpers
@@ -190,7 +198,7 @@ end
 
 function Abilities.RefreshHold()
 	local def = weapon()
-	local wantsHold = def.Class ~= "Glove" and def.Class ~= "FingerGun"
+	local wantsHold = not NO_HOLD[def.Class]
 	local t = tracks.Hold
 	if not t then
 		return
@@ -232,7 +240,7 @@ local function tryAttack()
 
 	local color = def.Glow or rarity.Color
 	if class.Kind == "Ranged" then
-		play(def.Class == "FingerGun" and "Point" or "Slash", 1.6)
+		play(POINT[def.Class] and "Point" or "Slash", 1.6)
 		VFX.Muzzle(muzzlePosition(dir), dir, color)
 	else
 		local big = combo == #class.Combo
@@ -322,7 +330,7 @@ local function skillMovement(skill, dir: Vector3, charge: number?)
 		doDash(dir, skill.Distance / dur, dur)
 		play("Lunge", 1.4)
 	elseif skill.Type == "Projectile" or skill.Type == "Barrage" then
-		play(weapon().Class == "FingerGun" and "Point" or "Lunge", 1.2)
+		play(POINT[weapon().Class] and "Point" or "Lunge", 1.2)
 	else
 		play("Lunge", 1)
 	end

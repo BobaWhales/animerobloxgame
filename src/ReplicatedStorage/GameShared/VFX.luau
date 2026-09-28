@@ -4,13 +4,22 @@
 -- pillars, impact frames, speed lines, title cards, camera shake, FOV punch.
 -- MakeEmitter() is also used by the server for auras / map decoration.
 -- Only uses built-in Roblox particle textures, so nothing needs uploading.
+--
+-- VFX HIERARCHY: the server builds ReplicatedStorage.VFX, a folder tree of
+-- every particle effect in the game (Combat / Elements / Auras / Ambient).
+-- MakeEmitter() clones from that tree, so you can restyle any effect in
+-- Studio's Explorer. To keep your edits: press Play, copy
+-- ReplicatedStorage.VFX, stop, and paste it into ReplicatedStorage. Existing
+-- templates are never overwritten; missing ones are recreated.
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 
 local Format = require(script.Parent:WaitForChild("Format"))
+local Config = require(script.Parent:WaitForChild("Config"))
 
 local VFX = {}
 
@@ -202,6 +211,90 @@ local PRESETS = {
 		e.Brightness = 2
 		e.LockedToPart = false
 	end,
+	-- elements (ore effects on weapons)
+	Frost = function(e: ParticleEmitter, c: Color3)
+		e.Texture = TEX.Sparkle
+		e.Color = CS(WHITE, c)
+		e.Size = NS(0, 0.35, 0.5, 0.5, 1, 0)
+		e.Lifetime = NumberRange.new(0.6, 1.1)
+		e.Speed = NumberRange.new(2, 6)
+		e.SpreadAngle = Vector2.new(180, 180)
+		e.Acceleration = Vector3.new(0, -4, 0)
+		e.Rotation = NumberRange.new(0, 360)
+		e.RotSpeed = NumberRange.new(-90, 90)
+		e.LightEmission = 0.8
+		e.Brightness = 2
+	end,
+	Lightning = function(e: ParticleEmitter, c: Color3)
+		e.Texture = TEX.Square
+		e.Color = CS(WHITE, c)
+		e.Size = NS(0, 0.2, 1, 0.05)
+		e.Squash = NS(-4)
+		e.Orientation = Enum.ParticleOrientation.VelocityParallel
+		e.Lifetime = NumberRange.new(0.08, 0.18)
+		e.Speed = NumberRange.new(40, 80)
+		e.SpreadAngle = Vector2.new(180, 180)
+		e.LightEmission = 1
+		e.Brightness = 6
+	end,
+	Poison = function(e: ParticleEmitter, c: Color3)
+		e.Texture = TEX.Smoke
+		e.Color = CS(c)
+		e.Size = NS(0, 0.4, 0.5, 1.2, 1, 0.2)
+		e.Transparency = NS(0, 0.3, 1, 1)
+		e.Lifetime = NumberRange.new(0.6, 1)
+		e.Speed = NumberRange.new(1, 3)
+		e.SpreadAngle = Vector2.new(180, 180)
+		e.Acceleration = Vector3.new(0, 3, 0)
+		e.LightEmission = 0.5
+	end,
+	Void = function(e: ParticleEmitter, c: Color3)
+		e.Texture = TEX.Implode
+		e.Color = CS(c)
+		e.Size = NS(0, 3, 1, 0)
+		e.Transparency = NS(0, 0.2, 1, 1)
+		e.Lifetime = NumberRange.new(0.3, 0.45)
+		e.Speed = NumberRange.new(0)
+		e.Rotation = NumberRange.new(0, 360)
+		e.RotSpeed = NumberRange.new(-200, 200)
+		e.LightEmission = 1
+		e.Brightness = 2
+	end,
+	Holy = function(e: ParticleEmitter, c: Color3)
+		e.Texture = TEX.Glow
+		e.Color = CS(WHITE, c)
+		e.Size = NS(0, 0.3, 0.4, 1, 1, 0)
+		e.Lifetime = NumberRange.new(0.6, 1)
+		e.Speed = NumberRange.new(3, 7)
+		e.EmissionDirection = Enum.NormalId.Top
+		e.SpreadAngle = Vector2.new(25, 25)
+		e.LightEmission = 1
+		e.Brightness = 3
+	end,
+	Wind = function(e: ParticleEmitter, c: Color3)
+		e.Texture = TEX.Square
+		e.Color = CS(c)
+		e.Size = NS(0, 0.12, 1, 0)
+		e.Squash = NS(-3)
+		e.Transparency = NS(0, 0.3, 1, 1)
+		e.Orientation = Enum.ParticleOrientation.VelocityParallel
+		e.Lifetime = NumberRange.new(0.25, 0.45)
+		e.Speed = NumberRange.new(18, 30)
+		e.SpreadAngle = Vector2.new(180, 30)
+		e.Drag = 3
+		e.LightEmission = 0.4
+	end,
+	Blood = function(e: ParticleEmitter, c: Color3)
+		e.Texture = TEX.Square
+		e.Color = CS(c)
+		e.Size = NS(0, 0.25, 1, 0.05)
+		e.Lifetime = NumberRange.new(0.4, 0.7)
+		e.Speed = NumberRange.new(8, 16)
+		e.SpreadAngle = Vector2.new(180, 180)
+		e.Acceleration = Vector3.new(0, -50, 0)
+		e.Rotation = NumberRange.new(0, 360)
+		e.LightEmission = 0.2
+	end,
 	-- slow, huge, barely-there ground fog (lit by the scene)
 	Fog = function(e: ParticleEmitter, c: Color3)
 		e.Texture = TEX.Smoke
@@ -260,13 +353,113 @@ local PRESETS = {
 }
 VFX.Presets = PRESETS
 
--- Create an emitter from a preset. Rate defaults to 0 (use :Emit()).
+---------------------------------------------------------------------
+-- VFX HIERARCHY  (ReplicatedStorage.VFX)
+---------------------------------------------------------------------
+-- category -> presets. Tint = how the gameplay colour is applied to a
+-- template: "Gradient" (white -> colour), "Solid" (colour), "None" (keep).
+VFX.Categories = {
+	{ Name = "Combat", Presets = { Sparks = "Gradient", Stars = "Gradient", Glow = "Solid", Core = "Gradient", Shock = "Solid", Shards = "Solid" } },
+	{ Name = "Elements", Presets = { Fire = "Gradient", Embers = "Gradient", Smoke = "Solid", Frost = "Gradient", Lightning = "Gradient", Poison = "Solid", Void = "Solid", Holy = "Gradient", Wind = "Solid", Blood = "Solid" } },
+	{ Name = "Auras", Presets = { Aura = "Gradient", Vortex = "Solid", Rise = "Gradient" } },
+	{ Name = "Ambient", Presets = { Fog = "Solid", Dust = "Solid", FloatEmbers = "Gradient", Petals = "Gradient" } },
+}
+local TINT_MODE = {}
+for _, cat in ipairs(VFX.Categories) do
+	for name, mode in pairs(cat.Presets) do
+		TINT_MODE[name] = mode
+	end
+end
+
+-- Server: create any missing templates (never overwrites your edits).
+function VFX.BuildLibrary()
+	local root = ReplicatedStorage:FindFirstChild("VFX")
+	if not root then
+		root = Instance.new("Folder")
+		root.Name = "VFX"
+		root.Parent = ReplicatedStorage
+	end
+	if not root:FindFirstChild("README") then
+		local readme = Instance.new("StringValue")
+		readme.Name = "README"
+		readme.Value = "Every particle effect in the game. Edit any emitter here to restyle it everywhere. Attribute 'Tint' = Gradient / Solid / None controls how gameplay colours are applied. To keep edits made while playing: copy this folder, stop, paste into ReplicatedStorage."
+		readme.Parent = root
+	end
+	for _, cat in ipairs(VFX.Categories) do
+		local folder = root:FindFirstChild(cat.Name)
+		if not folder then
+			folder = Instance.new("Folder")
+			folder.Name = cat.Name
+			folder.Parent = root
+		end
+		for name, mode in pairs(cat.Presets) do
+			if not folder:FindFirstChild(name) then
+				local e = Instance.new("ParticleEmitter")
+				e.Name = name
+				e.Enabled = false
+				e.Rate = 0
+				e.LightInfluence = 0
+				PRESETS[name](e, WHITE)
+				e:SetAttribute("Tint", mode)
+				e.Parent = folder
+			end
+		end
+	end
+	return root
+end
+
+local libIndex: { [string]: ParticleEmitter }? = nil
+local libWatched = false
+local function library(): { [string]: ParticleEmitter }?
+	if libIndex then
+		return libIndex
+	end
+	local root = ReplicatedStorage:FindFirstChild("VFX")
+	if not root then
+		return nil
+	end
+	local index = {}
+	for _, d in ipairs(root:GetDescendants()) do
+		if d:IsA("ParticleEmitter") then
+			index[d.Name] = d
+		end
+	end
+	if not libWatched then
+		libWatched = true
+		root.DescendantAdded:Connect(function()
+			libIndex = nil
+		end)
+		root.DescendantRemoving:Connect(function()
+			libIndex = nil
+		end)
+	end
+	libIndex = index
+	return index
+end
+
+-- Create an emitter from the VFX hierarchy (or the built-in preset).
+-- Rate defaults to 0 (use :Emit()).
 function VFX.MakeEmitter(preset: string, color: Color3, parent: Instance, rate: number?): ParticleEmitter
-	local e = Instance.new("ParticleEmitter")
+	color = color or WHITE
+	local lib = library()
+	local template = lib and lib[preset]
+	local e
+	if template then
+		e = template:Clone()
+		local mode = template:GetAttribute("Tint") or TINT_MODE[preset] or "Gradient"
+		if mode == "Gradient" then
+			e.Color = CS(WHITE, color)
+		elseif mode == "Solid" then
+			e.Color = CS(color)
+		end
+		e.Enabled = true
+	else
+		e = Instance.new("ParticleEmitter")
+		e.LightInfluence = 0
+		local fn = PRESETS[preset] or PRESETS.Sparks
+		fn(e, color)
+	end
 	e.Rate = rate or 0
-	e.LightInfluence = 0
-	local fn = PRESETS[preset] or PRESETS.Sparks
-	fn(e, color or WHITE)
 	e.Parent = parent
 	return e
 end
@@ -491,7 +684,7 @@ function VFX.DamageNumber(pos: Vector3, amount: number, crit: boolean?, color: C
 	local label = Instance.new("TextLabel")
 	label.BackgroundTransparency = 1
 	label.Size = UDim2.fromScale(1, 1)
-	label.Font = Enum.Font.LuckiestGuy
+	label.Font = Config.Fonts.Display
 	label.TextScaled = true
 	label.Text = (crit and "CRIT " or "") .. Format.Abbrev(amount)
 	label.TextColor3 = color or (crit and Color3.fromRGB(255, 215, 60) or WHITE)
@@ -536,7 +729,7 @@ function VFX.TextPop(pos: Vector3, text: string, color: Color3, size)
 	local label = Instance.new("TextLabel")
 	label.BackgroundTransparency = 1
 	label.Size = UDim2.fromScale(1, 1)
-	label.Font = Enum.Font.FredokaOne
+	label.Font = Config.Fonts.Body
 	label.TextScaled = true
 	label.Text = text
 	label.TextColor3 = color
@@ -864,7 +1057,7 @@ function VFX.TitleCard(title: string, subtitle: string?, color, duration)
 	t.AnchorPoint = Vector2.new(0.5, 0.5)
 	t.Position = UDim2.fromScale(0.5, subtitle and 0.42 or 0.5)
 	t.Size = UDim2.new(0.6, 0, 0, 72)
-	t.Font = Enum.Font.LuckiestGuy
+	t.Font = Config.Fonts.Display
 	t.TextScaled = true
 	t.Text = title
 	t.TextColor3 = color
@@ -884,7 +1077,7 @@ function VFX.TitleCard(title: string, subtitle: string?, color, duration)
 		s.AnchorPoint = Vector2.new(0.5, 0)
 		s.Position = UDim2.fromScale(0.5, 0.72)
 		s.Size = UDim2.new(0.6, 0, 0, 26)
-		s.Font = Enum.Font.FredokaOne
+		s.Font = Config.Fonts.Body
 		s.TextScaled = true
 		s.Text = subtitle
 		s.TextColor3 = WHITE
@@ -1009,6 +1202,18 @@ local function makeProjectileVisual(kind: string, color: Color3, size: number)
 		l.Range = 24
 		l.Brightness = 4
 		l.Parent = holder
+	elseif kind == "Arrow" then
+		holder = fxPart({ Size = Vector3.new(0.12, 0.12, 3.2 * math.max(1, size / 2)), Color = Color3.fromRGB(150, 110, 70), Material = Enum.Material.Wood })
+		local head = fxPart({ Size = Vector3.new(0.35, 0.35, 0.6), Color = color })
+		head.Name = "Head"
+		head.Rotation = Vector3.new(0, 0, 45)
+		head.Parent = holder
+		holder:SetAttribute("HeadOffset", holder.Size.Z / 2 + 0.2)
+	elseif kind == "Kunai" then
+		holder = fxPart({ Size = Vector3.new(0.3, 0.08, 1.4), Color = Color3.fromRGB(200, 205, 215), Material = Enum.Material.Metal })
+		local glowBlade = fxPart({ Size = Vector3.new(0.34, 0.1, 0.8), Color = color })
+		glowBlade.Name = "Core"
+		glowBlade.Parent = holder
 	else -- Ray / bullet
 		holder = fxPart({ Size = Vector3.new(0.22, 0.22, 3.5), Color = color })
 		local core = fxPart({ Size = Vector3.new(0.1, 0.1, 3.6), Color = WHITE })
@@ -1044,6 +1249,10 @@ local function stepProjectiles(dt)
 		local core = p.Holder:FindFirstChild("Core")
 		if core then
 			(core :: BasePart).CFrame = cf
+		end
+		local head = p.Holder:FindFirstChild("Head")
+		if head then
+			(head :: BasePart).CFrame = cf * CFrame.new(0, 0, -(p.Holder:GetAttribute("HeadOffset") or 1.8)) * CFrame.Angles(0, 0, math.rad(45))
 		end
 		if p.Traveled >= p.Range then
 			VFX.EndProjectile(id, pos, false)

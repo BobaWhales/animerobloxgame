@@ -1,6 +1,11 @@
 # +1 Loot for Anime: Setup Guide
 
-A Roblox Luau anime action game: slay anime-avatar enemies, loot ore and weapons, forge, roll gacha chests, and fight with iconic anime weapons. The map, enemies and weapons are all built by code, so there are no models to import. There is **no VIP zone and no PvP arena**.
+A Roblox Luau anime simulator in the style of +1 Loot To Forge:
+- Fight down a 30-stage **Path**, loot ore, and forge it into weapons whose ore effects carry over.
+- Grow your Power exponentially with Rebirths and Ascensions.
+- Take on the **Boss Rush**, and climb the leaderboards.
+
+The map, enemies, weapons, armor and VFX are all built by code, so there are no models to import.
 
 ---
 
@@ -8,7 +13,7 @@ A Roblox Luau anime action game: slay anime-avatar enemies, loot ore and weapons
 
 1. Download `build/PlusOneLootForAnime.rbxlx` and open it in Studio (**File → Open from File**).
 2. It already has **Lighting.Technology = Future**, the **2022 PBR materials** and **Shift Lock off** (Shift is sprint).
-3. Do the **UIPackPlus** step below, then press **Play**.
+3. Do the **UIPackPlus** step below (optional), then press **Play**.
 
 To move everything into your own place, open both places and copy these three objects across in the Explorer (right-click → Copy, then right-click the service → Paste Into):
 - `GameShared` → ReplicatedStorage
@@ -23,6 +28,7 @@ Create these objects with **these exact names and types**, then paste each file'
 ReplicatedStorage
 └── GameShared              (Folder)
     ├── Config              (ModuleScript)
+    ├── ForgeRules          (ModuleScript)   NEW
     ├── Format              (ModuleScript)
     ├── SFX                 (ModuleScript)
     ├── UITheme             (ModuleScript)
@@ -31,31 +37,38 @@ ReplicatedStorage
 
 ServerScriptService
 └── Server                  (Script)       <- init.server.luau
-    ├── Actions  Combat  Cosmetics  DataService  EnemyService
-    ├── Loot  MapBuilder  Monetization  Net  Playtime  Projectiles
-    └── Stats  TowerService  Util  Weapons          (all ModuleScripts)
+    ├── Actions  Admin  Combat  Cosmetics  DataService  EnemyService
+    ├── Forge  Leaderboards  Loot  MapBuilder  Monetization  Net
+    └── Playtime  Projectiles  Stats  TowerService  Util  Weapons   (all ModuleScripts)
 
 StarterPlayer
 └── StarterPlayerScripts
     └── Client              (LocalScript)  <- init.client.luau
-        ├── Abilities  CameraDirector  Drops  EnemyFX  Hud  Movement
-        └── PromptUI  UI  WeaponUI  WorldMap  WorldText      (all ModuleScripts)
+        ├── Abilities  AdminUI  CameraDirector  Drops  EnemyFX  ForgeUI
+        └── Hud  Movement  PromptUI  UI  WeaponUI  WorldMap  WorldText   (all ModuleScripts)
 ```
 
-**Three settings to set by hand when copy-pasting** (the place file already has them):
-1. **Lighting → Technology = Future** (Explorer → Lighting → Properties). Scripts can't change this.
-2. **MaterialService → Use2022Materials = true** (the modern PBR material set). Scripts can't change this either.
-3. **StarterPlayer → EnableMouseLockOption = false**, so Left Shift sprints instead of toggling Shift Lock.
+`Admin`, `Forge`, `Leaderboards`, `ForgeRules`, `ForgeUI` and `AdminUI` are new in this version.
 
-Also delete your old map, VIP room, PvP arena and old scripts first.
+The `ReplicatedStorage.VFX` folder is **created by the server** the first time it runs (see **VFX hierarchy** below), so you don't make it by hand.
+
+**Three settings to set by hand when copy-pasting** (the place file already has them):
+1. **Lighting → Technology = Future**
+2. **MaterialService → Use2022Materials = true**
+3. **StarterPlayer → EnableMouseLockOption = false** (Left Shift sprints)
+
+This version uses a new save key (`PlusOneLootAnime_v2`), so everyone starts fresh on the new progression.
 
 ---
 
-## UIPackPlus
+## UIPackPlus (optional)
 
 1. Drag `UIPackPlus.rbxm` into Studio.
 2. Move it into **ReplicatedStorage** and name it **`UIPackPlus`**.
-3. Press Play. The Output window lists every image it found. If something picks the wrong image, put the right image's name first in its list in `GameShared/UITheme → UITheme.Templates`.
+3. Press Play. The Output window lists every image it found.
+   - If something picks the wrong image, put the right image's name first in its list in `GameShared/UITheme → UITheme.Templates`.
+
+Without the pack, the built-in "ink & neon" style is used: dark panels, slanted accent tabs, and chunky simulator buttons with a lip.
 
 ---
 
@@ -68,194 +81,220 @@ Also delete your old map, VIP room, PvP arena and old scripts first.
 | Weapon skill (hold for charge skills) | **E** | X | Skill button |
 | Ultimate | **R** | Y | Ult button |
 | Overdrive transformation | **C** | LB | OD button |
-| Health potion | H | – | – |
+| Health potion | **H** | – | – |
 | Sprint (hold) | **Left Shift** | L3 | – |
-| Interact (custom prompts) | **F** | D-pad Up | Tap the prompt |
+| Interact / **pick up ore** | **F** | D-pad Up | Tap the prompt |
 | Menu drawer | **G** | D-pad Down | ≡ button (top left) |
 | World map | **M** | D-pad Right | Drawer → Map |
-
-Prompts use **F** instead of E because E is the weapon skill. You can also tap or click the hotbar slots.
-
-Inside the world map: drag, WASD or the left stick pans; the mouse wheel, pinch, Q/E or LB/RB zooms; B or M closes.
+| Home (back to spawn, also leaves the Boss Rush) | **B** | – | **HOME** button (top centre) |
+| Admin panel (admins only) | **P** | – | Drawer → Admin |
 
 ---
 
-## What's in the spec, and where it lives
+## What changed (all 22 requests)
 
-**1. Custom proximity prompts** (`Client/PromptUI`, `MapBuilder`, `Actions`)
-- Every prompt uses `Style = Custom`, `MaxActivationDistance = 10`, and `RequiresLineOfSight` from `Config.Prompt`.
-  - Line of sight is **off** by default because the forge prompt sits inside the cauldron rim.
-- The client draws an AlwaysOnTop BillboardGui with a CanvasGroup that fades in on `PromptShown` and out on `PromptHidden`, using TweenService.
-- The key label follows your current device (Keyboard / Controller / Touch) and updates live. Touch players tap the key.
-- `Triggered` fires `Remotes.Interact`. The server checks the prompt, the distance and the action before doing anything.
+**1. VFX hierarchy** (`GameShared/VFX`: `VFX.BuildLibrary`, `VFX.Categories`)
+- On start the server builds an editable library:
+  ```
+  ReplicatedStorage.VFX
+    Combat   (Sparks, Stars, Glow, Core, Shock, Shards)
+    Elements (Fire, Embers, Smoke, Frost, Lightning, Poison, Void, Holy, Wind, Blood)
+    Auras    (Aura, Vortex, Rise)
+    Ambient  (Fog, Dust, FloatEmbers, Petals)
+  ```
+- Each entry is a `ParticleEmitter` template. Every effect in the game clones it and re-tints it at runtime.
+- To restyle an effect, edit its emitter (texture, size, speed…) or drop in your own emitter with the same name. The server only creates templates that are missing, so your edits are kept.
+- The `Tint` attribute controls recolouring:
+  - `Gradient`: keeps the colour ramp.
+  - `Solid`: one colour.
+  - `None`: never re-tinted.
+- A `README` StringValue in the folder explains the same thing inside Studio.
 
-**2. Graphics** (`MapBuilder.buildLighting`, `Config.Graphics`)
-- Technology Future (set in the place file).
-- Atmosphere: Density 0.35, Haze 2.5, tinted colors.
-- Bloom: Threshold 0.75, Size 28, Intensity 0.5.
-- ColorCorrection: Contrast 0.18, Saturation 0.25.
-- SunRays: Intensity 0.2, Spread 0.8.
-- Depth of field blurs the world whenever a menu or the shop is open.
-- Shadow-casting lights at the forge, altar, statue, portals, lanterns, tower and chest shrine.
-- Ambient particles: floating energy motes and falling cherry blossoms in the hub, fireflies in Zone 1, dark aura trails in Zone 2.
-- Optional custom PBR `MaterialVariant`s: paste texture IDs in `Config.Graphics.MaterialVariants`.
+**2. "G for menus" hint** (`Client/UI`)
+- Small text next to the ≡ button at the top left.
+- It hides while the drawer or any menu is open.
 
-**3. Anime weapons and combat** (`Config.Weapons / Skills / WeaponClasses`, `Combat`, `Projectiles`, `WeaponModels`)
+**3. The map is revamped** (`Server/MapBuilder`, `Config.World`)
+- Compact spawn plaza. It has:
+  - the **Soul Forge** in the middle
+  - the Merchant (sell) and Upgrades stalls
+  - the Race Altar
+  - the Sword of Ascension (Rebirth / Ascend)
+  - the Ore Index board
+  - four leaderboard boards
+- **Training Grounds** island to the west.
+- **Boss Rush** island to the east.
+- **The Path** heads north through a torii gate.
+- The world map (`Client/WorldMap`) was re-laid-out to match. The Path is drawn compressed, with zone names, a stage number per room and a route line.
 
-| Weapon | Class | Tier | E skill |
-|---|---|---|---|
-| Starrk's Guns | Dual pistols | Mythic | **Cero Metralleta**: 26-shot cone barrage. Basic attacks fire server-raycast energy rays. |
-| Zangetsu | Greatsword | Mythic | **Getsuga Tensho**: piercing crescent wave. Basic attack is a 4-hit heavy combo. |
-| Rasengan | Glove | Legendary | Hold to charge an orb, then lunge. Heavy knockback, 5 damage ticks, and a ragdoll on the NPC. |
-| Enma | Katana | Legendary | Hell Dragon |
-| Shusui | Katana | Epic | Black Blade Rush |
-| Spirit Gun | Finger pistol | Epic | Charged piercing blast |
-| Dimensional Scythe | Scythe | Legendary | Dimensional Rift: a vortex that pulls enemies in |
+**4. Admin panel** (`Server/Admin`, `Client/AdminUI`)
+- Open it with **P** or the **Admin** tile in the drawer.
+- **Player tab:** + Coins / Power / Rebirths / Ascensions / Rerolls / Overdrive / Catalysts / every ore, unlock stages, heal, god mode, speed x3, go to, bring, and reset data (click twice).
+  - Target yourself, **Everyone**, or any player.
+  - The amount box takes numbers like `5000`, `2.5m`, `3qd` or `1e40`.
+- **Items tab:** give any ore; any weapon (pick a rarity and a maxed ore effect); any armor.
+- **Server tab ("admin abuse"):**
+  - **2x Luck, 3x Coins, 5x Power, 2x Ore Drops** events. The amount sets the duration in minutes. Active events show as timed chips at the top of everyone's screen.
+  - **Ore Rain**, **Coin Rain**, **Boss Invasion** at spawn (rewards everyone who helps), **Everyone Overdrive**, **Kill All Enemies**.
+  - **Announcements**, filtered through TextService.
+- Every command is checked again on the server and rate-limited.
+- **Who is an admin** (`Config.Admins`):
+  - the place owner (or rank 255 in the owning group)
+  - anyone in Studio
+  - `UserIds = { ... }`
+  - `GroupId` + `MinRank`
 
-- There are 25 weapons in total across 6 classes. Each class has its own **R** ultimate.
-- **Balance nerfs** live in `Config.Balance`:
-  - Every cooldown is **+25%**.
-  - Stamina costs are **+30%**.
-  - Dash i-frames are cut to **0.18s**.
-  - Stuns are capped at **1.2s** on enemies and **0.5s** on players.
-  - Crits are capped at **2.5x**.
-  - All gameplay damage multipliers combined are **hard-capped at 40x**.
+**5. Fighting is a Path, not portals** (`Config.Stages`, `EnemyService`, `MapBuilder.buildPath`)
+- 30 stages in a row across 6 zones:
+  1. Verdant Academy Ruins
+  2. Neon Mecha Docks
+  3. Sakura Underworld
+  4. Starlit Battlefront
+  5. Frostfang Peaks
+  6. The Rift Throne
+- **KO 8 enemies to clear a stage.** The force-field gate to the next stage then opens for you.
+  - The gate label shows your live count ("CLEAR STAGE 3  5/8").
+  - A tracker under HOME shows the stage you're standing in and its progress.
+- **Every 5th stage is a boss arena.** Defeat the boss to move on.
+- Stages only spawn enemies while a player is near, so 30 stages stay cheap to run.
+- The Fast Travel pass jumps you straight to any stage you've unlocked.
 
-**4. Rarity and loot** (`Config.WeaponRarities`, `Weapons`)
+**6. Armor, a rarer drop** (`Config.Armors`, `Weapons.AddArmor`, `WeaponModels.AttachArmor`, `WeaponUI` Armor panel)
+- Drop chance by source: normal enemies 0.4%, elites 4%, bosses 12%, Boss Rush 8%.
+- Eight sets, each with a bonus stat, and each worn visibly on your character with a glow by rarity:
 
-| Rarity | Drop rate | Bonus |
-|---|---|---|
-| Common | 50% | +5% damage |
-| Uncommon | 30% | +15% |
-| Rare | 13% | +35%, +5% attack speed |
-| Epic | 5% | +75%, particle trail |
-| Legendary | 1.8% | +150%, unique passive |
-| Mythic / Celestial | 0.2% | +300%, aura, signature skill |
-
-- Rolls use `Random.new()` weighted tables on the server, for both enemy drops and gacha chests.
-- Chest types: the coin **Weapon Chest**, plus **Uncommon**, **Rare+ Scroll** and **Legendary** chests that use keys.
-- The chest shrine is in the hub, and the **Chests** menu works anywhere.
-
-**5. Play-time rewards and streaks** (`Playtime`, `Hud`)
-- The server counts session time every second. A small timer in the bottom-left appears shortly before each reward, and the Rewards menu shows the whole ladder.
-
-| Session time | Reward |
+| Set | Bonus stat |
 |---|---|
-| 5 min | 100 Coins + Health Potion |
-| 15 min | Uncommon Chest Key |
-| 30 min | 2x Damage for 15 minutes |
-| 60 min | Rare+ Spin Scroll |
-| 120 min | Exclusive Playtime Aura + Legendary Chest Key |
+| Training Gi | Speed |
+| Shinobi Vest | Dodge |
+| Samurai O-Yoroi | Extra defense |
+| Mecha Frame | Stamina |
+| Oni Hide | Thorns |
+| Shinigami Robe | Lifesteal |
+| Saiyan Battle Armor | Power gain |
+| Celestial Aegis | Luck |
 
-- The daily streak, total play time and last login day are saved in the DataStore.
-- Each streak day adds +5% Coins (up to +50%) and pays out more Coins each day. Every 7th day in a row also gives a Rare+ Scroll.
+- Defense by rarity: 5% / 9% / 14% / 20% / 28% / 38%, capped at 75% total.
 
-**6. Anime avatar enemies** (`EnemyService`)
-- Each enemy is an R15 rig built from a `HumanoidDescription`, with procedural anime hair and accessories (spiky, long or bun hair; headband, horns, mask, crown or visor).
-  - Add real catalog hair, accessory, Shirt and Pants IDs in `Config.EnemyCatalog`.
-  - If the R15 rig can't be built, a hand-built R6 rig is used instead.
-- Animations (Idle, Walk, Run, BasicAttack, SpecialWindup, SpecialRelease) are preloaded into an `Animator`. The defaults are Roblox's own animations; swap in yours via `Config.EnemyAnims`.
-- `PathfindingService` handles chasing. A state machine runs special attacks:
-  1. Check the cooldown and distance.
-  2. Play the wind-up animation plus a red ground telegraph (a circle for boss slams, a line for lunges).
-  3. Release. Damage lands on the animation's **"Hit" keyframe or marker** (`KeyframeReached` / `GetMarkerReachedSignal`). Roblox's default animations have no "Hit" marker, so a timed fallback is used until you upload your own.
-- There are no head health bars; see **Enemy redesign** below for how health is shown now.
+**7. More unique fonts** (`Config.Fonts`)
+- **Bangers**: titles, numbers and buttons (manga sound-effect look).
+- **Sarpanch**: labels and key caps.
+- **Oswald**: body text.
+- Change all three in one place.
 
-**7. 2x Power purchases** (`Monetization`, `WeaponUI` Power panel)
-- Tier *n* costs **3ⁿ Robux** (3, 9, 27, 81…) and sets your damage multiplier to **2ⁿ**.
-- Create one Developer Product per tier at the matching price and paste the IDs into `Config.PowerTiers` (8 tiers, up to 6,561 Robux).
-- `ProcessReceipt` checks the product against the player's next tier, then sets `PowerTier`, saves, and returns `PurchaseGranted`.
-  - If a player somehow buys a higher tier, they jump to that tier.
-  - If they buy a tier they already own, it's converted to Coins, so no Robux is ever lost.
-- The Power multiplier is applied **after** the 40x gameplay cap.
-- The shop shows the current multiplier, the next one, and the exact Robux price.
+**8. A little darker** (`Config.Graphics`)
+- Later dusk sun, lower exposure and ambient light, heavier haze and a slightly darker colour grade.
 
----
+**9. Leaderboards** (`Server/Leaderboards`, `Config.Leaderboards`)
+- Four boards at spawn: **Top Power**, **Furthest Stage**, **Top Rebirths** (ranked by ascensions first, then rebirths) and **Top Slayers**.
+- They use OrderedDataStores, refreshed every 60 s. Power is stored as a log so it never overflows.
+- Without API access, the boards show the players in the current server.
+- The player list shows Power / Stage / Rebirths.
 
-## Clean screen, map, enemies and atmosphere
+**10. Boss Rush replaces the Infinity Tower** (`TowerService`, `Config.BossRush`)
+- Unlocks after clearing stage 5. Enter at the island gate.
+- Wave after wave of Path bosses, 45 s per boss:
+  - Every 5th wave sends **two bosses**.
+  - Every 10th wave pays a catalyst.
+- Each boss gives Coins, Runes (permanent +2% damage each), ore and a chance at armor.
+- **HOME** leaves the run.
 
-**1. UI de-cluttering and world text** (`Client/Hud`, `Client/UI`, `Client/WorldText`, `Client/PromptUI`, `Config.Hud`, `Config.WorldText`)
-- Nothing sits on screen permanently. Each HUD group fades in only when it matters, then fades out:
+**11. Training pads are gated by Rebirths / Ascensions** (`Config.TrainPads`)
 
-| Element | Shows when | Hides after |
-|---|---|---|
-| Slim HP + stamina bars (with a trailing damage "chip") | You take damage, heal, use stamina or a potion, or are in combat | `DamageLinger` / `StaminaLinger` (4 s / 2.5 s) |
-| Compact hotbar (LMB / Q / E / R / C) | You attack, are hit, an enemy is in aggro range, or a cooldown is running | `CombatLinger` (5 s) |
-| Resource pills (Power, Coins, Bag…) | That value changes; only the pills that changed appear | `ResourceLinger` (3.5 s) |
-| Play-time timer | 45 s before a reward, and when one is granted | 6 s |
-| Boss bar | You are near a living boss | when you leave |
+| Pad | x1 | x3 | x10 | x40 | x150 | x1,000 | x8,000 | x75,000 | x1,000,000 |
+|---|---|---|---|---|---|---|---|---|---|
+| Needs | – | 1 Rebirth | 3 Rebirths | 6 Rebirths | 10 Rebirths | 1 Ascension | 2 Ascensions | 4 Ascensions | 7 Ascensions |
 
-- Below 30% HP the bars stay up and the screen edges get a soft pulsing red vignette.
-- The old left and right button columns are gone: one small **≡** button (or **G**) opens a menu drawer. Opening it "peeks" every HUD element at once.
-- **World labels** (station names, portals, pad multipliers, gates, player name tags) start at **0% opacity**. They fade in, rise slightly and scale up when you are within **10 studs (about 2.8 m)**, with a 5-stud fade band.
-  - Distance is measured to the closest point of the labelled object, so big landmarks work.
-  - Labels are **45% smaller**, drawn with a light drop shadow on a soft glow streak instead of heavy outlines or boxes.
-  - Your own name tag never shows. Hidden labels are disabled, so they cost nothing to render.
-- Prompts are now a small key cap with text on a soft glow, about 45% smaller, with no panel box.
+**12. More Roblox-simulator style** (`Client/UI`)
+- Always-visible currency stack on the left: Power, Coins, Ore Bag and Rebirths.
+  - The Rebirths chip shows "% to rebirth" and "REBIRTH READY!".
+  - Click a chip to open its menu.
+- Forge level and Damage chips pop in when they change.
+- Chunky buttons, big number pops, and coins that fly into the HUD.
 
-**2. World map** (`Client/WorldMap`, M key)
-- **Style:** a dark holographic grid with topographic contour rings, glowing region outlines, a slow scanline shimmer and a soft vignette.
-- **Layered depth:** stars, grid, contours, terrain and two cloud layers sit at different depths, so panning gives subtle parallax. Panning has inertia.
-- **Fog of war:** areas you haven't walked into yet (train grounds, portal gate, tower, each dungeon stage) sit under drifting cloud banks labelled "UNCHARTED". The clouds dissolve the moment you explore an area. Exploration is saved per player (`Explored` in the save data). Future zones stay fogged as "Coming soon".
-- **Waypoints:** small colour-coded geometric symbols:
-  - gold diamond = service
-  - purple square = power
-  - cyan ring = travel
-  - outlined square = stage (grey while locked)
-  - pulsing red diamond = boss
-- Hover or tap a symbol and it expands into a callout with its description, lock status or distance, plus:
-  - **Track:** places a small world marker with the distance, which clears when you arrive.
-  - **Travel:** teleports you. The server still enforces the Fast Travel pass.
-- Landmarks come from parts the server tags `POI` (see `MapBuilder.poi`), so new landmarks appear on the map automatically.
+**13. More exponential** (`Config.PathCurve`, `Config.Rebirth`, `Config.Ascension`)
+- Stage HP grows ×1.9 per stage and Coins ×1.75 per stage. Stage 30's boss has about 109B HP.
+- Each **Rebirth** multiplies Power gain by ×1.65 and Coins by ×1.3. Both compound.
+  - It costs 1K Power at first, ×3.2 per rebirth.
+- Each **Ascension** multiplies Power by ×8 and Coins by ×4, and gives rerolls and a Legendary Catalyst.
+  - It needs 10 Rebirths, then +5 per ascension.
+  - It resets rebirths and makes future rebirths ×25 pricier.
+- Numbers abbreviate all the way to 10^93, then switch to scientific notation.
 
-**3. Enemy redesign** (`EnemyService`, `Client/EnemyFX`, `Config.EnemyLooks`, `Config.EliteLook`, `Config.EnemyAI`)
-- **Silhouettes:** each enemy type has a distinct, readable shape instead of detail noise:
+**14. Consistent, unique UI** (`GameShared/UITheme`, `UI.MakePanel`)
+- Every menu uses one template:
+  - a dark ink panel
+  - a slanted accent tab with the title
+  - a thin accent rule
+  - a square close button
+- Rows use the same dark style with a coloured rarity or accent bar on the left.
 
-| Enemy | Silhouette |
+**15. Infinite upgrade levels** (`Config.UpgradeCost`)
+- There's no max level. Price = `Base + Step × level` up to level 50, then that price × `Growth^(level − 50)`.
+
+| Upgrade | Growth after level 50 |
 |---|---|
-| Slime Delinquent | Brawler pauldrons and wrapped fists |
-| Hall Monitor Oni | Great horns and a spined back |
-| Club Captain Golem | Boulder shoulders and fists |
-| Rooftop Ronin | Wide straw hat and scarf |
-| Student Council Tyrant | Cape, collar and shoulder spikes |
-| Scrap Drone | Neon halo and antenna |
-| Mech-Grunt | Plated shoulders and thruster pack |
-| Neon Ninja Unit | Flowing scarf tails |
-| Plasma Warden | Shoulder pylons |
-| Mecha Admiral Kaizer | Cape and epaulettes |
+| Ore Bag | ×1.12 per level |
+| Luck | ×1.13 per level |
+| Training | ×1.14 per level |
 
-- All enemies use flat, clean materials. The face decal is replaced by **glowing eyes**, and each has a glowing **chest core**.
-- **No head health bars:**
-  - The core dims toward embers and flickers as HP drops.
-  - A hair-thin line appears for 2 s only over enemies *you* hit.
-  - Bosses get the slim top-of-screen bar.
-- **Anticipation and recovery.** Every attack follows the same readable rhythm:
-  1. **Anticipation:** the enemy leans back, its eyes flare white with a glint, and its core burns hot.
-  2. **Strike:** it snaps forward.
-  3. **Recovery:** it slumps with dim eyes and core. During recovery it takes **+25% damage** (an "EXPOSED" pop). This window is longer after special attacks.
-  - Timings are in `Config.EnemyAI.Anticipation / Recovery / SpecialRecovery`.
-- **Variant tiers:**
-  - Stage 3+ of each zone adds armour plating.
-  - Stage 4+ adds glowing runes.
-  - Bosses get everything.
-  - **Elites** switch to a dark-gold palette with gold eyes, core, plates and runes, a gold crest and a thin gold outline.
+**16. The ore bag starts at 3 ores** (`Config.BaseBackpack`)
+- Each Ore Bag level adds +1 slot.
 
-**4. Atmosphere, audio and camera** (`MapBuilder`, `SFX`, `VFX`, `Client/Movement`, `Client/CameraDirector`)
-- **Lighting:**
-  - A lower golden-hour sun gives longer shadows. There are volumetric clouds and slightly crisper shadow softness.
-  - The dungeons have shadow-casting wall sconces, and lanterns and flames gently flicker.
-- **Particles:** rolling ground fog around the plaza, train grounds, tower and dungeon halls; dust motes drifting in the light; lazy embers off the forge, the tower and the Neon Mecha Docks.
-- **Audio:**
-  - Impacts are layered (a bright transient, a body thump, a crunch and a tail). Each weapon family sounds different: blades "shing", heavy weapons thud, guns and energy fizz.
-  - UI clicks are crisp "key press" ticks.
-  - Roblox's looping run sound is replaced by real one-shot footsteps timed to your stride. They change with the floor (grass, stone, wood, metal, soft), nearby players get them too, and bosses stomp.
-- **Camera:**
-  - Heavy impacts (slams, Rasengan, crits, boss kills) add a low-frequency rumble on top of the normal shake.
-  - Sprinting smoothly widens the FOV.
-  - Near points of interest (the forge, altar, statue, portals, tower) and during boss fights, the camera eases toward the landmark, pulls back slightly and tightens the FOV so both you and it are framed.
-  - All camera effects are removed again before Roblox's camera updates, so they never drift or fight your own camera control. Framing turns off in first person, in menus and on the map.
+**17. Interact to pick up ore** (`Client/Drops`)
+- Dropped ore shows an **F – Pick up** prompt. One press grabs every ore within reach.
+- The Auto-Collect gamepass still skips the prompt. The Auto-Forge pass became **Auto-Sell**.
 
-**Kept from before:** hub map laid out like +1 Loot To Forge, ore → Forge levels, races, Overdrive, rebirth, the Infinite Tower, the Index, codes, gamepasses, layered SFX and anime VFX.
+**18. Catalog avatar enemies** (`EnemyService.catalogDescription`, `Config.EnemyAvatars`)
+- Each stage's enemy is built from the **Avatar Editor catalog**. The server searches `AvatarEditorService:SearchCatalogAsync` with themed keywords (hair, hat, shirt, pants per stage), builds a `HumanoidDescription`, and spawns it with `Players:CreateHumanoidModelFromDescriptionAsync`.
+- Results are cached.
+- You can pin exact items per stage in `Config.EnemyCatalogOverrides`, or copy a real avatar with `Config.EnemyAvatarUserIds[stage] = userId`.
+- If the catalog can't be reached (for example Studio without API access), the procedural anime look is used instead.
+
+**19. Forging replaces weapon chests** (`Server/Forge`, `GameShared/ForgeRules`, `Client/ForgeUI`)
+- At the **Soul Forge** (or drawer → Forge while standing near it), put 1–3 ores in the crucible and, optionally, a catalyst. A coin fee applies.
+- The preview uses the same maths as the server. It shows:
+  - the ore effects the weapon will get
+  - the weapon-type odds
+  - the minimum rarity
+  - the fee
+  - Forge levels gained. The old "+1 Forge" progression lives on: forging raises your Forge level.
+- **17 unique recipes** forge iconic weapons from exact 3-ore mixes. Examples:
+
+| Weapon | Ores |
+|---|---|
+| Rasengan | Chakra Copper + Gale Opal + Ki Crystal |
+| Zangetsu | Void Mythril + Sun Iron ×2 |
+| Raijin Kunai | Storm Quartz ×2 + Echo Glass |
+
+- Undiscovered recipes show a hint in the **Recipes** tab. The first discovery is announced to the server.
+- Catalysts (Uncommon / Rare+ / Legendary) set a minimum rarity. They come from play-time rewards, bosses, the Boss Rush and ascending.
+
+**20. Ores apply effects to weapons** (`Config.Effects`, `Combat.hit`)
+- 21 effects, each stamped on the weapon by its ore. Duplicate ores stack.
+
+| Group | Effects |
+|---|---|
+| Damage and procs | Heavy, Burn, Frost (slow + bonus damage), Shock (chain lightning), Poison, Bleed (on crits), Pierce, Echo (double hit), Crit, Radiant (splash), Void (execute) |
+| Speed, cost and sustain | Haste, Ki Flow (cheaper skills), Chrono (shorter cooldowns), Lifesteal |
+| Push | Gale (knockback) |
+| Economy | Fortune (coins), Greed (luck) |
+| Scaling and kill rewards | Titan (bonus damage vs bosses), Soul (Power per kill), Holy (heal on kill) |
+
+- Each effect has a per-point value and a cap.
+- Weapons show their effects as coloured dots, list them in the detail pane, and glow with the strongest effect's particles.
+- The Index lists every ore's effect.
+
+**21. More ores and weapon types**
+- **22 ores** (from 7): 3 Common, 4 Uncommon, 4 Rare, 4 Epic, 3 Legendary, 2 Mythic and 2 Rift-forged.
+- **16 weapon classes** (from 6). New: Spear, Daggers, Hammer, Bow, Staff, Chain, Claws, Fan, Kunai and Hand Cannon.
+  - Each has its own model, attack style (multi-shot, explosive, knockback, reach), skills and an ultimate.
+- **65 weapons.**
+- Which class you forge depends on the ore effects (for example, Burn leans Katana/Staff, Frost leans Spear/Bow).
+
+**22. Less clutter, plus a HOME button**
+- The map keeps only the stations you use, with fewer props.
+- A **HOME** button sits at the top centre (key **B**) and teleports you to spawn from anywhere. In the Boss Rush it also ends the run.
 
 ---
 
@@ -263,18 +302,21 @@ Inside the world map: drag, WASD or the left stick pans; the mouse wheel, pinch,
 
 | What | Where |
 |---|---|
+| Admins (besides you, the owner) | `Config.Admins.UserIds`, `GroupId`, `MinRank` |
+| Event multipliers / durations | `Config.Events` |
 | Power tier product IDs (3, 9, 27… Robux) | `Config.PowerTiers[n].Id` |
 | Gamepass / other product IDs | `Config.GamePasses`, `Config.Products` |
-| Enemy catalog hair / clothes (optional) | `Config.EnemyCatalog` |
-| Custom enemy / player animations (optional) | `Config.EnemyAnims`, `Config.PlayerAnims` |
-| PBR texture maps (optional) | `Config.Graphics.MaterialVariants` |
-| Music (optional) | `Config.Music` |
-| Rename weapons | `Config.Weapons` (`Name` field) |
-| World-text fade distance / size | `Config.WorldText` |
-| How long HUD pop-ups stay | `Config.Hud` |
-| Sprint speed / FOV, camera framing strength | `Config.Sprint`, `Config.Camera` |
-| Enemy silhouettes / glow colours | `Config.EnemyLooks` (`Silhouette`, `Core`), `Config.EliteLook` |
+| Enemy catalog keywords / exact items / avatar user IDs | `Config.EnemyAvatars`, `Config.EnemyCatalogOverrides`, `Config.EnemyAvatarUserIds` |
+| Forge recipes | `Config.Recipes` |
+| Ores and their effects | `Config.Ores`, `Config.Effects` |
+| Stage curve (HP, coins, kills to clear) | `Config.PathCurve` |
+| Rebirth / Ascension maths | `Config.Rebirth`, `Config.Ascension` |
+| Upgrade prices | `Config.Upgrades`, `Config.UpgradeLinearUntil` |
+| Fonts | `Config.Fonts` |
+| Darkness / colour grade | `Config.Graphics` |
+| Music (optional) | `Config.Music` (`Hub`, `Path`, `BossRush`) |
+| Custom animations (optional) | `Config.EnemyAnims`, `Config.PlayerAnims` |
 
-**Saving in Studio:** turn on *Game Settings → Security → Enable Studio Access to API Services*.
+**Saving and leaderboards in Studio:** turn on *Game Settings → Security → Enable Studio Access to API Services*. The catalog enemies need this too.
 
-**Heads-up on names:** Zangetsu, Starrk, Getsuga Tensho, Cero Metralleta, Rasengan, Enma, Shusui and Spirit Gun belong to existing anime (Bleach, Naruto, One Piece, Yu Yu Hakusho). Plenty of Roblox games use names like these, but they can draw takedown requests. Every name is one field in `Config.Weapons` / `Config.Skills` if you ever need to rename them.
+**Heads-up on names:** Zangetsu, Starrk, Getsuga Tensho, Cero, Rasengan, Enma, Shusui, Spirit Gun and similar names belong to existing anime. Plenty of Roblox games use names like these, but they can draw takedown requests. Every name is one field in `Config.Weapons` / `Config.Skills` if you ever need to rename them.

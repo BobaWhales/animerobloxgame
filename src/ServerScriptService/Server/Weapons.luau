@@ -1,7 +1,8 @@
 --!nonstrict
 -- Weapons (ModuleScript) -> ServerScriptService/Server/Weapons
--- Weapon inventory, weighted rarity rolls (Random.new), equip + welding the
--- weapon model to the character's hands.
+-- Weapon + armour inventories, weighted rarity rolls (Random.new), equip,
+-- and building the gear models on the character. Weapons carry the ore
+-- effects they were forged with (rec.E = { [effectId] = points }).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -61,7 +62,7 @@ function Weapons.Roll(minRarity: string?, luck: number?): (string, string)
 end
 
 -- Adds a weapon. If the inventory is full it is scrapped for coins.
-function Weapons.Add(player: Player, weaponId: string, rarityId: string): string?
+function Weapons.Add(player: Player, weaponId: string, rarityId: string, effects: { [string]: number }?): string?
 	local data = DataService.Get(player)
 	if not data or not Config.WeaponById[weaponId] then
 		return nil
@@ -75,7 +76,7 @@ function Weapons.Add(player: Player, weaponId: string, rarityId: string): string
 	end
 	local uid = "w" .. data.NextWeaponId
 	data.NextWeaponId += 1
-	data.Weapons[uid] = { W = weaponId, R = rarityId }
+	data.Weapons[uid] = { W = weaponId, R = rarityId, E = effects or {} }
 	DataService.MarkDirty(player)
 	return uid
 end
@@ -111,6 +112,7 @@ function Weapons.Refresh(player: Player)
 	local def = rec and Config.WeaponById[rec.W] or Config.WeaponById[Config.StarterWeapon]
 	local rarityId = rec and rec.R or "Common"
 	local built = WeaponModels.Build(def.Id, rarityId, data.Blade)
+	WeaponModels.ApplyEffects(built, rec and rec.E)
 	WeaponModels.AttachToCharacter(char, built)
 	local class = Config.WeaponClasses[def.Class]
 	player:SetAttribute("WeaponId", def.Id)
@@ -149,6 +151,88 @@ function Weapons.Scrap(player: Player, uid: string)
 	data.Weapons[uid] = nil
 	data.Coins += scrap
 	Net.Notify(player, "Scrapped " .. Config.WeaponById[rec.W].Name .. " for " .. scrap .. " Coins.", Color3.fromRGB(255, 215, 70), "Sell")
+	DataService.MarkDirty(player)
+end
+
+---------------------------------------------------------------------
+-- ARMOR
+---------------------------------------------------------------------
+function Weapons.RollArmor(luck: number?): (string, string)
+	local rarity = Weapons.RollRarity(nil, luck)
+	local a = Config.Armors[rng:NextInteger(1, #Config.Armors)]
+	return a.Id, rarity
+end
+
+function Weapons.AddArmor(player: Player, armorId: string, rarityId: string): string?
+	local data = DataService.Get(player)
+	if not data or not Config.ArmorById[armorId] or not Config.WeaponRarityById[rarityId] then
+		return nil
+	end
+	if count(data.Armors) >= Config.MaxArmors then
+		local scrap = Config.WeaponRarityById[rarityId].Scrap
+		data.Coins += scrap
+		Net.Notify(player, "Armor storage full - auto-scrapped for " .. scrap .. " Coins.", Color3.fromRGB(255, 170, 90), "Error")
+		DataService.MarkDirty(player)
+		return nil
+	end
+	local uid = "a" .. data.NextArmorId
+	data.NextArmorId += 1
+	data.Armors[uid] = { A = armorId, R = rarityId }
+	DataService.MarkDirty(player)
+	return uid
+end
+
+function Weapons.RefreshArmor(player: Player)
+	local data = DataService.Get(player)
+	local char = player.Character
+	if not data or not char then
+		return
+	end
+	local rec = data.Armors[data.EquippedArmor]
+	if rec then
+		WeaponModels.AttachArmor(char, rec.A, rec.R)
+	else
+		WeaponModels.RemoveArmor(char)
+	end
+end
+
+function Weapons.EquipArmor(player: Player, uid: string)
+	local data = DataService.Get(player)
+	if not data or type(uid) ~= "string" then
+		return
+	end
+	if uid == "" or uid == data.EquippedArmor then
+		data.EquippedArmor = "" -- toggle off
+	elseif data.Armors[uid] then
+		data.EquippedArmor = uid
+	else
+		return
+	end
+	Weapons.RefreshArmor(player)
+	DataService.MarkDirty(player)
+	local rec = data.Armors[data.EquippedArmor]
+	if rec then
+		Net.FX(player, "ArmorEquipped", { Armor = rec.A, Rarity = rec.R })
+	end
+end
+
+function Weapons.ScrapArmor(player: Player, uid: string)
+	local data = DataService.Get(player)
+	if not data or type(uid) ~= "string" then
+		return
+	end
+	local rec = data.Armors[uid]
+	if not rec then
+		return
+	end
+	if uid == data.EquippedArmor then
+		Net.Notify(player, "Unequip that armor before scrapping it.", Color3.fromRGB(255, 120, 90), "Error")
+		return
+	end
+	local scrap = Config.WeaponRarityById[rec.R].Scrap
+	data.Armors[uid] = nil
+	data.Coins += scrap
+	Net.Notify(player, "Scrapped " .. Config.ArmorById[rec.A].Name .. " for " .. scrap .. " Coins.", Color3.fromRGB(255, 215, 70), "Sell")
 	DataService.MarkDirty(player)
 end
 

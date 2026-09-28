@@ -38,15 +38,23 @@ local DEFAULT = {
 	Overdrive = Config.Overdrive.StartingPotions,
 	Index = {}, -- [oreId] = true
 	Kills = 0,
-	TowerBest = 0,
+	TowerBest = 0, -- best Boss Rush wave
+	-- the Path
+	Stage = 0, -- highest stage cleared
+	StageKills = 0, -- kills toward clearing the next stage
+	Ascensions = 0,
 	Codes = {}, -- [CODE] = true
 	StarterPack = false,
 	Receipts = {}, -- recent purchase ids (dedupe)
 	Settings = { Music = true, SFX = true },
 	-- weapons / loot
-	Weapons = {}, -- ["w1"] = { W = weaponId, R = rarityId }
+	Weapons = {}, -- ["w1"] = { W = weaponId, R = rarityId, E = { [effectId] = points } }
 	NextWeaponId = 1,
 	Equipped = "",
+	Armors = {}, -- ["a1"] = { A = armorId, R = rarityId }
+	NextArmorId = 1,
+	EquippedArmor = "",
+	Recipes = {}, -- [recipeKey] = true once discovered
 	Keys = { Uncommon = 0, RareScroll = 0, Legendary = 0 },
 	Potions = 1,
 	BoostEnds = 0, -- 2x damage boost end (server time)
@@ -97,7 +105,6 @@ local function newSession()
 		NextDropId = 0,
 		Tower = nil,
 		LastFullNotify = 0,
-		LastPortal = 0,
 		Pad = 0,
 		Loaded = false,
 		-- combat

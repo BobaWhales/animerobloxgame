@@ -1,11 +1,14 @@
 --!nonstrict
 -- MapBuilder (ModuleScript) -> ServerScriptService/Server/MapBuilder
--- Builds the whole world in code, laid out like +1 Loot To Forge:
---   Hub (spawn plaza) with the Forge cauldron, Sell stall, Upgrade stall,
---   Rebirth statue, Race altar, Index board and Leaderboard.
---   Train area (multiplier pads) to the west.
---   Dungeon portals to the north -> linear stage-by-stage dungeons.
---   Infinite Tower to the east.
+-- Builds the whole world in code, simulator style (and a little darker):
+--   Spawn Plaza   Soul Forge, Sell + Upgrade stalls, Race altar, Rebirth /
+--                 Ascension statue, Ore Index and four leaderboards.
+--   West island   Training Grounds (multiplier pads gated by rebirths /
+--                 ascensions).
+--   East island   Boss Rush arena.
+--   North         THE PATH: one long road of stages like +1 Loot To Forge.
+--                 Kill enough enemies to open the next gate; a boss guards
+--                 every 5th stage; the theme changes every zone.
 -- There is NO VIP room and NO PvP arena.
 
 local Lighting = game:GetService("Lighting")
@@ -24,7 +27,6 @@ local WHITE = Color3.new(1, 1, 1)
 local FLAT = CFrame.Angles(0, 0, math.rad(90)) -- cylinder axis X -> Y (flat disc)
 
 local root: Folder
-local buildChestShrine, buildAmbient
 
 local function P(parent: Instance, props): Part
 	local p = Instance.new(props.ClassName or "Part")
@@ -143,7 +145,7 @@ local function billboard(adornee: Instance, title: string, sub: string?, color: 
 	gg.Parent = glow
 
 	local titleH = sub and 0.6 or 1
-	textLine(fade, "Title", title, color:Lerp(WHITE, 0.25), Enum.Font.BuilderSansExtraBold, UDim2.fromScale(0, 0), UDim2.fromScale(1, titleH), 2)
+	textLine(fade, "Title", title, color:Lerp(WHITE, 0.25), Config.Fonts.Display, UDim2.fromScale(0, 0), UDim2.fromScale(1, titleH), 2)
 	if sub then
 		local rule = Instance.new("Frame")
 		rule.Name = "Rule"
@@ -160,7 +162,7 @@ local function billboard(adornee: Instance, title: string, sub: string?, color: 
 			NumberSequenceKeypoint.new(1, 1),
 		})
 		rg.Parent = rule
-		textLine(fade, "Sub", sub, Color3.fromRGB(235, 232, 245), Enum.Font.BuilderSansMedium, UDim2.fromScale(0.05, 0.68), UDim2.fromScale(0.9, 0.3), 2)
+		textLine(fade, "Sub", sub, Color3.fromRGB(235, 232, 245), Config.Fonts.Body, UDim2.fromScale(0.05, 0.68), UDim2.fromScale(0.9, 0.3), 2)
 	end
 	return bb
 end
@@ -251,23 +253,23 @@ local function buildLighting()
 	pcall(function()
 		(Lighting :: any).Technology = Enum.Technology.Future
 	end)
-	-- a lower golden-hour sun gives longer, more dramatic shadows
-	Lighting.ClockTime = 16.1
-	Lighting.Brightness = 3
-	Lighting.Ambient = Color3.fromRGB(80, 75, 100)
-	Lighting.OutdoorAmbient = Color3.fromRGB(140, 130, 165)
+	-- late dusk: long shadows, a little darker overall (Config.Graphics)
+	Lighting.ClockTime = G.ClockTime
+	Lighting.Brightness = G.Brightness
+	Lighting.Ambient = G.Ambient
+	Lighting.OutdoorAmbient = G.OutdoorAmbient
 	Lighting.EnvironmentDiffuseScale = 1
 	Lighting.EnvironmentSpecularScale = 1
 	Lighting.GlobalShadows = true
 	Lighting.ShadowSoftness = 0.18
-	Lighting.ExposureCompensation = 0.1
+	Lighting.ExposureCompensation = G.Exposure
 	Lighting.GeographicLatitude = 35
 
 	-- soft volumetric clouds for depth on the horizon
 	local clouds = workspace.Terrain:FindFirstChildOfClass("Clouds") or Instance.new("Clouds")
 	clouds.Cover = 0.55
 	clouds.Density = 0.6
-	clouds.Color = Color3.fromRGB(255, 244, 250)
+	clouds.Color = Color3.fromRGB(200, 185, 215)
 	clouds.Parent = workspace.Terrain
 
 	for _, c in ipairs(Lighting:GetChildren()) do
@@ -414,574 +416,431 @@ local function stall(parent, cf: CFrame, color: Color3, title: string, sub: stri
 end
 
 ---------------------------------------------------------------------
--- HUB
+-- SPAWN PLAZA
 ---------------------------------------------------------------------
-local function buildHub(map)
-	local hub = folder("Hub", root)
+local STONE = Color3.fromRGB(62, 58, 72)
+local STONE_DARK = Color3.fromRGB(42, 39, 52)
+local TRIM = Color3.fromRGB(255, 120, 190)
+local W = Config.World
+
+local function bridge(parent, from: Vector3, to: Vector3, width: number, color: Color3)
+	local mid = (from + to) / 2
+	local len = (to - from).Magnitude
+	local cf = CFrame.lookAt(mid, to)
+	P(parent, { Name = "Bridge", Size = Vector3.new(width, 1.2, len), CFrame = cf * CFrame.new(0, -0.1, 0), Color = STONE_DARK, Material = Enum.Material.Slate })
+	for _, side in ipairs({ -1, 1 }) do
+		P(parent, { Name = "Rail", Size = Vector3.new(0.6, 1.6, len), CFrame = cf * CFrame.new(side * (width / 2 - 0.3), 1, 0), Color = STONE, Material = Enum.Material.Slate })
+		P(parent, { Name = "RailGlow", Size = Vector3.new(0.2, 0.2, len), CFrame = cf * CFrame.new(side * (width / 2 - 0.3), 1.9, 0), Color = color, Material = Enum.Material.Neon, CanCollide = false })
+	end
+end
+
+local function board(parent, cf: CFrame, title: string, color: Color3)
+	local b = P(parent, { Name = title .. "Board", Size = Vector3.new(16, 20, 1), CFrame = cf * CFrame.new(0, 11, 0), Color = STONE_DARK, Material = Enum.Material.Slate })
+	P(parent, { Name = "BoardFrame", Size = Vector3.new(16.8, 20.8, 0.8), CFrame = b.CFrame * CFrame.new(0, 0, 0.2), Color = color, Material = Enum.Material.Neon, CanCollide = false }).Transparency = 0.6
+	local sg = Instance.new("SurfaceGui")
+	sg.Name = "Board"
+	sg.Face = Enum.NormalId.Front
+	sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	sg.PixelsPerStud = 30
+	sg.LightInfluence = 0
+	sg.Brightness = 1.4
+	sg.Parent = b
+	local bg = Instance.new("Frame")
+	bg.Size = UDim2.fromScale(1, 1)
+	bg.BackgroundColor3 = Color3.fromRGB(12, 10, 20)
+	bg.Parent = sg
+	local grad = Instance.new("UIGradient")
+	grad.Color = ColorSequence.new(color:Lerp(Color3.new(0, 0, 0), 0.75), Color3.fromRGB(10, 8, 16))
+	grad.Rotation = 90
+	grad.Parent = bg
+	local t = Instance.new("TextLabel")
+	t.Name = "Title"
+	t.BackgroundTransparency = 1
+	t.Position = UDim2.fromScale(0.05, 0.02)
+	t.Size = UDim2.fromScale(0.9, 0.11)
+	t.Font = Config.Fonts.Display
+	t.TextScaled = true
+	t.Text = title
+	t.TextColor3 = color
+	t.Parent = bg
+	local rows = Instance.new("Frame")
+	rows.Name = "Rows"
+	rows.BackgroundTransparency = 1
+	rows.Position = UDim2.fromScale(0.05, 0.15)
+	rows.Size = UDim2.fromScale(0.9, 0.83)
+	rows.Parent = bg
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0.008, 0)
+	layout.Parent = rows
+	return b, rows
+end
+
+local function buildPlaza(map)
+	local hub = folder("Plaza", root)
 	local rng = Random.new(7)
 
-	P(hub, { Name = "Ground", Size = Vector3.new(900, 4, 900), CFrame = CFrame.new(0, -2, 0), Color = Color3.fromRGB(105, 175, 95), Material = Enum.Material.Grass })
+	-- dark meadow below everything (walkable, so nobody falls forever)
+	P(hub, { Name = "Ground", Size = Vector3.new(1400, 4, 1400), CFrame = CFrame.new(0, -3, -300), Color = Color3.fromRGB(34, 44, 36), Material = Enum.Material.Grass })
 
-	-- Plaza rings
-	disc(hub, Vector3.new(0, 0.15, 0), 120, 0.3, Color3.fromRGB(215, 205, 190), Enum.Material.Slate, "Plaza")
-	disc(hub, Vector3.new(0, 0.2, 0), 104, 0.3, Color3.fromRGB(235, 225, 215), Enum.Material.Marble, "PlazaInner")
-	disc(hub, Vector3.new(0, 0.25, 0), 60, 0.3, Color3.fromRGB(245, 200, 215), Enum.Material.Marble, "PlazaCore")
-	local ringNeon = disc(hub, Vector3.new(0, 0.27, 0), 62, 0.25, Color3.fromRGB(255, 120, 190), Enum.Material.Neon, "PlazaGlow")
-	ringNeon.Transparency = 0.4
+	local R = W.PlazaRadius
+	disc(hub, Vector3.new(0, 0.5, 0), R * 2, 2, STONE, Enum.Material.Slate, "Plaza")
+	disc(hub, Vector3.new(0, 1.55, 0), R * 2 - 10, 0.2, Color3.fromRGB(78, 74, 90), Enum.Material.Slate, "PlazaInner")
+	disc(hub, Vector3.new(0, 1.6, 0), R * 2 - 9, 0.12, TRIM, Enum.Material.Neon, "PlazaGlow").Transparency = 0.55
+	disc(hub, Vector3.new(0, 1.7, 0), 26, 0.12, Color3.fromRGB(95, 88, 115), Enum.Material.Marble, "Emblem")
+	disc(hub, Vector3.new(0, 1.75, 0), 22, 0.1, TRIM, Enum.Material.Neon, "EmblemGlow").Transparency = 0.7
 
-	-- Paths
-	local path = Color3.fromRGB(190, 180, 165)
-	P(hub, { Name = "PathTrain", Size = Vector3.new(50, 0.3, 14), CFrame = CFrame.new(-80, 0.15, 0), Color = path, Material = Enum.Material.Cobblestone })
-	P(hub, { Name = "PathPortals", Size = Vector3.new(14, 0.3, 50), CFrame = CFrame.new(0, 0.15, -82), Color = path, Material = Enum.Material.Cobblestone })
-	P(hub, { Name = "PathTower", Size = Vector3.new(80, 0.3, 14), CFrame = CFrame.new(95, 0.15, 0), Color = path, Material = Enum.Material.Cobblestone })
-
-	-- Spawn
-	local spawn = P(hub, { ClassName = "SpawnLocation", Name = "Spawn", Size = Vector3.new(10, 0.6, 10), CFrame = CFrame.new(0, 0.5, 26), Color = Color3.fromRGB(255, 150, 200), Material = Enum.Material.Neon, Transparency = 0.35, CanCollide = true })
+	-- spawn
+	local spawn = P(hub, { ClassName = "SpawnLocation", Name = "Spawn", Size = Vector3.new(10, 0.4, 10), CFrame = CFrame.new(0, 1.8, 34), Color = TRIM, Material = Enum.Material.Neon, Transparency = 0.45, CanCollide = true })
 	spawn.Duration = 0
 	spawn.Neutral = true
-	emitter(spawn, "Rise", Color3.fromRGB(255, 170, 220), 6)
-	map.HubCFrame = CFrame.new(0, 4, 22)
+	emitter(spawn, "Rise", TRIM, 5)
+	map.HubCFrame = CFrame.new(0, 5, 30)
 	poi(spawn, "Spawn", "Travel", "Where every adventure starts.", "Hub", { Frame = 0, Travel = "Hub" })
 
-	---------------- FORGE (center) ----------------
-	local forgeModel = Instance.new("Model")
-	forgeModel.Name = "Forge"
-	local fpos = Vector3.new(0, 0, -30)
-	disc(forgeModel, fpos + Vector3.new(0, 0.6, 0), 28, 1.2, Color3.fromRGB(70, 65, 75), Enum.Material.Slate, "ForgeBase")
-	disc(forgeModel, fpos + Vector3.new(0, 1.3, 0), 24, 0.3, Color3.fromRGB(255, 110, 30), Enum.Material.Neon, "ForgeGlowRing").Transparency = 0.5
-	for i = 1, 3 do
-		local a = i * (math.pi * 2 / 3)
-		P(forgeModel, { Name = "Leg", Size = Vector3.new(1.4, 3, 1.4), CFrame = CFrame.new(fpos + Vector3.new(math.cos(a) * 4.6, 2.7, math.sin(a) * 4.6)), Color = Color3.fromRGB(35, 30, 35), Material = Enum.Material.Metal })
-	end
-	local pot = P(forgeModel, { Name = "Cauldron", Shape = Enum.PartType.Cylinder, Size = Vector3.new(6, 13, 13), CFrame = CFrame.new(fpos + Vector3.new(0, 6.5, 0)) * FLAT, Color = Color3.fromRGB(40, 35, 45), Material = Enum.Material.Metal })
-	P(forgeModel, { Name = "Belly", Shape = Enum.PartType.Ball, Size = Vector3.new(14, 9, 14), CFrame = CFrame.new(fpos + Vector3.new(0, 5.5, 0)), Color = Color3.fromRGB(40, 35, 45), Material = Enum.Material.Metal })
-	disc(forgeModel, fpos + Vector3.new(0, 9.6, 0), 14.4, 0.9, Color3.fromRGB(60, 55, 65), Enum.Material.Metal, "Rim")
-	local lava = disc(forgeModel, fpos + Vector3.new(0, 9.7, 0), 12, 0.6, Color3.fromRGB(255, 120, 30), Enum.Material.Neon, "Lava")
-	light(lava, Color3.fromRGB(255, 140, 50), 34, 3, true)
+	---------------- SOUL FORGE (north centre) ----------------
+	local forge = Instance.new("Model")
+	forge.Name = "SoulForge"
+	local fpos = Vector3.new(0, 1.6, -34)
+	disc(forge, fpos + Vector3.new(0, 0.6, 0), 30, 1.2, STONE_DARK, Enum.Material.Slate, "ForgeBase")
+	disc(forge, fpos + Vector3.new(0, 1.25, 0), 26, 0.2, Color3.fromRGB(255, 110, 30), Enum.Material.Neon, "ForgeRing").Transparency = 0.55
+	P(forge, { Name = "Belly", Shape = Enum.PartType.Ball, Size = Vector3.new(14, 10, 14), CFrame = CFrame.new(fpos + Vector3.new(0, 6, 0)), Color = Color3.fromRGB(34, 30, 38), Material = Enum.Material.Metal })
+	disc(forge, fpos + Vector3.new(0, 10.3, 0), 14.4, 0.9, Color3.fromRGB(58, 52, 62), Enum.Material.Metal, "Rim")
+	local lava = disc(forge, fpos + Vector3.new(0, 10.4, 0), 12, 0.6, Color3.fromRGB(255, 120, 30), Enum.Material.Neon, "Lava")
+	light(lava, Color3.fromRGB(255, 130, 50), 38, 3.2, true)
 	emitter(lava, "Embers", Color3.fromRGB(255, 150, 60), 14, Vector3.new(0, 0.5, 0))
 	emitter(lava, "Fire", Color3.fromRGB(255, 120, 30), 10, Vector3.new(0, 0.5, 0))
-	local _, fireAtt = emitter(forgeModel.PrimaryPart or pot, "Fire", Color3.fromRGB(255, 90, 20), 22)
-	fireAtt.WorldPosition = fpos + Vector3.new(0, 1.8, 0)
-	loopSound(lava, "rbxasset://sounds/action_swim.mp3", 0.5, 0.35)
-	-- chimney hood
-	P(forgeModel, { Name = "Chimney", Size = Vector3.new(7, 26, 7), CFrame = CFrame.new(fpos + Vector3.new(0, 13, -12)), Color = Color3.fromRGB(120, 70, 60), Material = Enum.Material.Brick })
-	local chimTop = P(forgeModel, { Name = "ChimneyTop", Size = Vector3.new(8.5, 1.5, 8.5), CFrame = CFrame.new(fpos + Vector3.new(0, 26.5, -12)), Color = Color3.fromRGB(60, 50, 55), Material = Enum.Material.Slate })
-	emitter(chimTop, "Smoke", Color3.fromRGB(120, 115, 125), 4, Vector3.new(0, 1, 0))
-	-- anvil
-	P(forgeModel, { Name = "AnvilBase", Size = Vector3.new(2, 2.4, 2), CFrame = CFrame.new(fpos + Vector3.new(10, 2.4, 5)), Color = Color3.fromRGB(50, 50, 60), Material = Enum.Material.Metal })
-	P(forgeModel, { Name = "AnvilTop", Size = Vector3.new(4.5, 1.2, 2.2), CFrame = CFrame.new(fpos + Vector3.new(10, 4.2, 5)), Color = Color3.fromRGB(70, 70, 85), Material = Enum.Material.Metal })
-	billboard(lava, "FORGE", "Smelt ore -> +1 Forge level", Color3.fromRGB(255, 160, 60), 9)
-	local forgePrompt = prompt(lava, "Forge Ore", "Forge Cauldron", "ForgePrompt", "Forge")
-	forgeModel.Parent = hub
+	loopSound(lava, "rbxasset://sounds/action_swim.mp3", 0.45, 0.35)
+	-- anvils where weapons take shape
+	for _, side in ipairs({ -1, 1 }) do
+		local ax = fpos + Vector3.new(side * 11, 0, 4)
+		P(forge, { Name = "AnvilBase", Size = Vector3.new(2, 2.6, 2), CFrame = CFrame.new(ax + Vector3.new(0, 2.5, 0)), Color = Color3.fromRGB(48, 48, 58), Material = Enum.Material.Metal })
+		P(forge, { Name = "AnvilTop", Size = Vector3.new(4.6, 1.2, 2.2), CFrame = CFrame.new(ax + Vector3.new(0, 4.4, 0)), Color = Color3.fromRGB(70, 70, 86), Material = Enum.Material.Metal })
+		local glowBar = P(forge, { Name = "Ingot", Size = Vector3.new(2.4, 0.3, 0.6), CFrame = CFrame.new(ax + Vector3.new(0, 5.15, 0)), Color = Color3.fromRGB(255, 150, 60), Material = Enum.Material.Neon, CanCollide = false })
+		emitter(glowBar, "Sparks", Color3.fromRGB(255, 170, 70), 2)
+	end
+	P(forge, { Name = "Chimney", Size = Vector3.new(7, 30, 7), CFrame = CFrame.new(fpos + Vector3.new(0, 15, -13)), Color = Color3.fromRGB(70, 44, 42), Material = Enum.Material.Brick })
+	local chimTop = P(forge, { Name = "ChimneyTop", Size = Vector3.new(8.5, 1.5, 8.5), CFrame = CFrame.new(fpos + Vector3.new(0, 30.5, -13)), Color = STONE_DARK, Material = Enum.Material.Slate })
+	emitter(chimTop, "Smoke", Color3.fromRGB(90, 85, 95), 4, Vector3.new(0, 1, 0))
+	billboard(lava, "SOUL FORGE", "Combine ores into weapons", Color3.fromRGB(255, 160, 60), 9)
+	map.ForgePrompt = prompt(lava, "Forge Weapons", "Soul Forge", "ForgePrompt", "Forge")
+	map.ForgePrompt.MaxActivationDistance = 14
+	forge.Parent = hub
 	map.Forge = lava
-	map.ForgePrompt = forgePrompt
-	poi(lava, "Forge", "Service", "Smelt ore into Forge levels for your weapon.", "Hub", { Frame = 28, Travel = "Hub" })
+	poi(lava, "Soul Forge", "Service", "Combine 1-3 ores into a weapon. Ore effects carry over; secret combos forge iconic weapons.", "Hub", { Frame = 28, Travel = "Hub" })
 
 	---------------- SELL + UPGRADES ----------------
-	local _, sellCounter = stall(hub, CFrame.new(-40, 0, -20) * CFrame.Angles(0, math.rad(35), 0), Color3.fromRGB(255, 200, 60), "SELL", "Ore -> Coins")
+	local _, sellCounter = stall(hub, CFrame.new(-44, 1.6, -4) * CFrame.Angles(0, math.rad(70), 0), Color3.fromRGB(255, 200, 60), "SELL", "Ore -> Coins")
 	map.Sell = sellCounter
 	map.SellPrompt = prompt(sellCounter, "Sell Ore", "Merchant", "SellPrompt", "Sell")
 	poi(sellCounter, "Merchant", "Service", "Sell ore for Coins.", "Hub", { Frame = 20, Travel = "Hub" })
-	local _, upCounter = stall(hub, CFrame.new(40, 0, -20) * CFrame.Angles(0, math.rad(-35), 0), Color3.fromRGB(80, 170, 255), "UPGRADES", "Backpack / Luck / Training")
-	map.Upgrades = upCounter
+	local _, upCounter = stall(hub, CFrame.new(44, 1.6, -4) * CFrame.Angles(0, math.rad(-70), 0), Color3.fromRGB(80, 170, 255), "UPGRADES", "Bag / Luck / Training")
 	map.UpgradePrompt = prompt(upCounter, "Open Upgrades", "Trainer", "UpgradePrompt", "Upgrades")
-	poi(upCounter, "Upgrades", "Service", "Backpack, Luck and Training upgrades.", "Hub", { Frame = 20, Travel = "Hub" })
+	poi(upCounter, "Upgrades", "Service", "Infinite Bag, Luck and Training upgrades.", "Hub", { Frame = 20, Travel = "Hub" })
 
-	---------------- RACE ALTAR ----------------
+	---------------- RACE ALTAR (north-west) ----------------
 	local altar = Instance.new("Model")
 	altar.Name = "RaceAltar"
-	local apos = Vector3.new(-42, 0, 22)
-	disc(altar, apos + Vector3.new(0, 0.6, 0), 20, 1.2, Color3.fromRGB(60, 55, 90), Enum.Material.Slate, "AltarBase")
-	disc(altar, apos + Vector3.new(0, 1.25, 0), 16, 0.2, Color3.fromRGB(140, 110, 255), Enum.Material.Neon, "AltarGlow").Transparency = 0.3
-	local orb = P(altar, { Name = "Orb", Shape = Enum.PartType.Ball, Size = Vector3.one * 4, CFrame = CFrame.new(apos + Vector3.new(0, 7, 0)), Color = Color3.fromRGB(200, 170, 255), Material = Enum.Material.Neon, CanCollide = false })
+	local apos = Vector3.new(-40, 1.6, -38)
+	disc(altar, apos + Vector3.new(0, 0.6, 0), 18, 1.2, STONE_DARK, Enum.Material.Slate, "AltarBase")
+	disc(altar, apos + Vector3.new(0, 1.25, 0), 14, 0.2, Color3.fromRGB(140, 110, 255), Enum.Material.Neon, "AltarGlow").Transparency = 0.4
+	local orb = P(altar, { Name = "Orb", Shape = Enum.PartType.Ball, Size = Vector3.one * 3.6, CFrame = CFrame.new(apos + Vector3.new(0, 7, 0)), Color = Color3.fromRGB(190, 160, 255), Material = Enum.Material.Neon, CanCollide = false })
 	spin(orb, 0, 0.8)
-	light(orb, Color3.fromRGB(170, 130, 255), 26, 2.5, true)
+	light(orb, Color3.fromRGB(160, 120, 255), 24, 2.4, true)
 	emitter(orb, "Vortex", Color3.fromRGB(170, 120, 255), 3)
-	emitter(orb, "Stars", Color3.fromRGB(200, 170, 255), 4)
-	P(altar, { Name = "Pedestal", Size = Vector3.new(3, 4, 3), CFrame = CFrame.new(apos + Vector3.new(0, 3, 0)), Color = Color3.fromRGB(80, 70, 110), Material = Enum.Material.Marble })
-	for i, race in ipairs(Config.Races) do
-		local a = (i / #Config.Races) * math.pi * 2
-		local crystal = P(altar, { Name = "Crystal_" .. race.Id, Size = Vector3.new(1.2, 3, 1.2), CFrame = CFrame.new(apos + Vector3.new(math.cos(a) * 7, 5, math.sin(a) * 7)) * CFrame.Angles(0, a, math.rad(45)), Color = race.Color, Material = Enum.Material.Neon, CanCollide = false })
-		spin(crystal, 60, 0.6)
-	end
+	P(altar, { Name = "Pedestal", Size = Vector3.new(3, 4, 3), CFrame = CFrame.new(apos + Vector3.new(0, 3, 0)), Color = STONE, Material = Enum.Material.Marble })
 	billboard(orb, "RACE ALTAR", "Roll your bloodline", Color3.fromRGB(190, 150, 255), 5)
 	map.RacePrompt = prompt(orb, "Roll Race", "Race Altar", "RacePrompt", "Race")
 	map.RacePrompt.MaxActivationDistance = 12
-	poi(orb, "Race Altar", "Power", "Roll your anime bloodline.", "Hub", { Frame = 24, Travel = "Hub" })
 	altar.Parent = hub
+	poi(orb, "Race Altar", "Power", "Roll your anime bloodline.", "Hub", { Frame = 22, Travel = "Hub" })
 
-	---------------- REBIRTH STATUE (giant sword in stone) ----------------
+	---------------- REBIRTH / ASCENSION STATUE (north-east) ----------------
 	local statue = Instance.new("Model")
-	statue.Name = "RebirthStatue"
-	local spos = Vector3.new(42, 0, 22)
-	P(statue, { Name = "Rock", Size = Vector3.new(12, 5, 12), CFrame = CFrame.new(spos + Vector3.new(0, 2.5, 0)) * CFrame.Angles(0, math.rad(20), 0), Color = Color3.fromRGB(120, 115, 130), Material = Enum.Material.Rock })
-	P(statue, { Name = "Rock2", Size = Vector3.new(8, 3, 9), CFrame = CFrame.new(spos + Vector3.new(0, 5.5, 0)) * CFrame.Angles(0, math.rad(55), 0), Color = Color3.fromRGB(105, 100, 115), Material = Enum.Material.Rock })
-	local blade = P(statue, { Name = "Blade", Size = Vector3.new(1.4, 20, 4), CFrame = CFrame.new(spos + Vector3.new(0, 15, 0)) * CFrame.Angles(0, 0, math.rad(6)), Color = Color3.fromRGB(220, 230, 245), Material = Enum.Material.Metal })
-	P(statue, { Name = "Edge", Size = Vector3.new(0.6, 20, 0.5), CFrame = blade.CFrame * CFrame.new(0, 0, 2.1), Color = Color3.fromRGB(255, 215, 90), Material = Enum.Material.Neon, CanCollide = false })
-	P(statue, { Name = "Guard", Size = Vector3.new(2, 1.6, 10), CFrame = blade.CFrame * CFrame.new(0, 10.6, 0), Color = Color3.fromRGB(255, 200, 70), Material = Enum.Material.Metal })
-	P(statue, { Name = "Hilt", Size = Vector3.new(1.4, 6, 1.4), CFrame = blade.CFrame * CFrame.new(0, 14.2, 0), Color = Color3.fromRGB(80, 30, 40), Material = Enum.Material.Fabric })
-	local pommel = P(statue, { Name = "Pommel", Shape = Enum.PartType.Ball, Size = Vector3.one * 2.4, CFrame = blade.CFrame * CFrame.new(0, 17.6, 0), Color = Color3.fromRGB(255, 220, 90), Material = Enum.Material.Neon })
-	light(pommel, Color3.fromRGB(255, 210, 90), 30, 2, true)
-	emitter(blade, "Rise", Color3.fromRGB(255, 220, 110), 5)
-	billboard(pommel, "REBIRTH", "Reset Power for permanent boosts", Color3.fromRGB(255, 215, 90), 4)
+	statue.Name = "AscensionStatue"
+	local spos = Vector3.new(40, 1.6, -38)
+	P(statue, { Name = "Rock", Size = Vector3.new(11, 4, 11), CFrame = CFrame.new(spos + Vector3.new(0, 2, 0)) * CFrame.Angles(0, math.rad(20), 0), Color = STONE_DARK, Material = Enum.Material.Rock })
+	local blade = P(statue, { Name = "Blade", Size = Vector3.new(1.3, 18, 3.6), CFrame = CFrame.new(spos + Vector3.new(0, 13, 0)) * CFrame.Angles(0, 0, math.rad(6)), Color = Color3.fromRGB(200, 210, 230), Material = Enum.Material.Metal })
+	P(statue, { Name = "Edge", Size = Vector3.new(0.55, 18, 0.45), CFrame = blade.CFrame * CFrame.new(0, 0, 1.9), Color = Color3.fromRGB(255, 215, 90), Material = Enum.Material.Neon, CanCollide = false })
+	P(statue, { Name = "Guard", Size = Vector3.new(1.9, 1.5, 9), CFrame = blade.CFrame * CFrame.new(0, 9.6, 0), Color = Color3.fromRGB(230, 180, 60), Material = Enum.Material.Metal })
+	local pommel = P(statue, { Name = "Pommel", Shape = Enum.PartType.Ball, Size = Vector3.one * 2.2, CFrame = blade.CFrame * CFrame.new(0, 13, 0), Color = Color3.fromRGB(255, 215, 90), Material = Enum.Material.Neon })
+	light(pommel, Color3.fromRGB(255, 200, 90), 28, 2, true)
+	emitter(blade, "Rise", Color3.fromRGB(255, 220, 110), 4)
+	billboard(pommel, "REBIRTH", "Rebirth & Ascend for huge multipliers", Color3.fromRGB(255, 215, 90), 4)
 	local holder = P(statue, { Name = "PromptHolder", Size = Vector3.one, Transparency = 1, CanCollide = false, CFrame = CFrame.new(spos + Vector3.new(0, 4, 0)) })
-	map.RebirthPrompt = prompt(holder, "Rebirth", "Sword of Ascension", "RebirthPrompt", "Rebirth")
-	poi(holder, "Sword of Ascension", "Power", "Rebirth for permanent boosts.", "Hub", { Frame = 26, Travel = "Hub" })
+	map.RebirthPrompt = prompt(holder, "Rebirth / Ascend", "Sword of Ascension", "RebirthPrompt", "Rebirth")
 	statue.Parent = hub
+	poi(holder, "Sword of Ascension", "Power", "Rebirth for x1.65 Power each, Ascend for x8.", "Hub", { Frame = 24, Travel = "Hub" })
 
-	---------------- INDEX + LEADERBOARD ----------------
-	local function board(pos: Vector3, title: string, color: Color3)
-		local b = P(hub, { Name = title .. "Board", Size = Vector3.new(18, 12, 1), CFrame = CFrame.lookAt(pos + Vector3.new(0, 8, 0), Vector3.new(0, 8, 0)), Color = Color3.fromRGB(40, 35, 50), Material = Enum.Material.Wood })
-		for _, x in ipairs({ -8, 8 }) do
-			P(hub, { Name = "BoardPost", Size = Vector3.new(1, 14, 1), CFrame = b.CFrame * CFrame.new(x, -1, 0.8), Color = Color3.fromRGB(90, 60, 45), Material = Enum.Material.Wood })
-		end
-		local sg = Instance.new("SurfaceGui")
-		sg.Face = Enum.NormalId.Front
-		sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-		sg.PixelsPerStud = 40
-		sg.LightInfluence = 0
-		sg.Parent = b
-		local bg = Instance.new("Frame")
-		bg.Size = UDim2.fromScale(1, 1)
-		bg.BackgroundColor3 = Color3.fromRGB(20, 16, 32)
-		bg.Parent = sg
-		local grad = Instance.new("UIGradient")
-		grad.Color = ColorSequence.new(Color3.fromRGB(40, 30, 70), Color3.fromRGB(15, 12, 25))
-		grad.Rotation = 90
-		grad.Parent = bg
-		local t = Instance.new("TextLabel")
-		t.Name = "Title"
-		t.BackgroundTransparency = 1
-		t.Size = UDim2.new(1, 0, 0.16, 0)
-		t.Font = Enum.Font.LuckiestGuy
-		t.TextScaled = true
-		t.Text = title
-		t.TextColor3 = color
-		t.Parent = bg
-		local list = Instance.new("TextLabel")
-		list.Name = "Body"
-		list.BackgroundTransparency = 1
-		list.Position = UDim2.fromScale(0.05, 0.18)
-		list.Size = UDim2.fromScale(0.9, 0.8)
-		list.Font = Enum.Font.FredokaOne
-		list.TextScaled = true
-		list.TextXAlignment = Enum.TextXAlignment.Left
-		list.TextYAlignment = Enum.TextYAlignment.Top
-		list.TextColor3 = WHITE
-		list.RichText = true
-		list.Text = ""
-		list.Parent = bg
-		return b, list
-	end
-	local indexBoard, indexBody = board(Vector3.new(-20, 0, 52), "ORE INDEX", Color3.fromRGB(120, 220, 255))
+	---------------- ORE INDEX ----------------
+	local indexBoard, indexRows = board(hub, CFrame.lookAt(Vector3.new(-62, 1.6, 26), Vector3.new(0, 1.6, 10)), "ORE INDEX", Color3.fromRGB(120, 220, 255))
 	local lines = {}
 	for _, ore in ipairs(Config.Ores) do
-		table.insert(lines, string.format('<font color="#%s">%s</font>  (%s)', ore.Color:ToHex(), ore.Name, Config.Rarity[ore.Rarity].Label))
+		table.insert(lines, string.format('<font color="#%s">%s</font> <font color="#aaaaaa">%s</font>', ore.Color:ToHex(), ore.Name, Config.Effects[ore.Effect].Name))
 	end
-	indexBody.Text = table.concat(lines, "\n")
+	local body = Instance.new("TextLabel")
+	body.BackgroundTransparency = 1
+	body.Size = UDim2.fromScale(1, 1)
+	body.Font = Config.Fonts.Body
+	body.TextScaled = true
+	body.RichText = true
+	body.TextXAlignment = Enum.TextXAlignment.Left
+	body.TextYAlignment = Enum.TextYAlignment.Top
+	body.TextColor3 = Color3.new(1, 1, 1)
+	body.Text = table.concat(lines, "\n")
+	body.Parent = indexRows
 	map.IndexPrompt = prompt(indexBoard, "Open Index", "Ore Index", "IndexPrompt", "Index")
-	poi(indexBoard, "Ore Index", "Service", "Every ore you have discovered.", "Hub", { Frame = 0, Travel = "Hub" })
-	local _, lbBody = board(Vector3.new(20, 0, 52), "TOP BLADES", Color3.fromRGB(255, 210, 80))
-	lbBody.Text = "Loading..."
-	map.LeaderboardText = lbBody
+	poi(indexBoard, "Ore Index", "Service", "Every ore and its weapon effect.", "Hub", { Frame = 0, Travel = "Hub" })
 
-	---------------- TREES / LANTERNS / SKY RIFT ----------------
-	for i = 1, 14 do
-		local a = (i / 14) * math.pi * 2 + 0.2
-		local r = 72 + rng:NextNumber(-4, 8)
-		local pos = Vector3.new(math.cos(a) * r, 0, math.sin(a) * r)
-		-- keep the paths clear
-		if math.abs(pos.Z) > 12 or pos.X > -60 and pos.X < 60 then
-			if not (math.abs(pos.X) < 12 and pos.Z < 0) then
-				cherryTree(hub, pos, rng:NextNumber(0.9, 1.3), rng)
-			end
+	---------------- LEADERBOARDS (south arc) ----------------
+	map.Leaderboards = {}
+	for i, lb in ipairs(Config.Leaderboards) do
+		local x = -45 + (i - 1) * 30
+		local _, rows = board(hub, CFrame.lookAt(Vector3.new(x, 1.6, 60), Vector3.new(x * 0.6, 1.6, 0)), lb.Title, lb.Color)
+		map.Leaderboards[lb.Key] = rows
+	end
+
+	---------------- light decor (kept sparse) ----------------
+	for i = 1, 8 do
+		local a = (i / 8) * math.pi * 2 + 0.4
+		local pos = Vector3.new(math.cos(a) * (R + 22), -1, math.sin(a) * (R + 22))
+		if math.abs(pos.X) > 30 and math.abs(pos.Z) > 20 then
+			cherryTree(hub, pos, rng:NextNumber(1, 1.3), rng)
 		end
 	end
-	for _, pos in ipairs({ Vector3.new(-62, 0, 9), Vector3.new(-62, 0, -9), Vector3.new(-9, 0, -62), Vector3.new(9, 0, -62), Vector3.new(62, 0, 9), Vector3.new(62, 0, -9), Vector3.new(-9, 0, -100), Vector3.new(9, 0, -100) }) do
+	for _, pos in ipairs({ Vector3.new(-9, 1.6, -64), Vector3.new(9, 1.6, -64), Vector3.new(-64, 1.6, 9), Vector3.new(-64, 1.6, -9), Vector3.new(64, 1.6, 9), Vector3.new(64, 1.6, -9) }) do
 		lantern(hub, pos)
 	end
-	torii(hub, CFrame.new(-92, 0, 0) * CFrame.Angles(0, math.rad(90), 0), 14, 16)
-	torii(hub, CFrame.new(0, 0, -95), 14, 16)
-
-	local rift = Instance.new("Model")
-	rift.Name = "SkyRift"
-	local center = Vector3.new(0, 150, -260)
-	local segs = 28
-	local ringHolder = P(rift, { Name = "RiftCore", Size = Vector3.one, Transparency = 1, CanCollide = false, CFrame = CFrame.new(center) })
-	for i = 1, segs do
-		local a = (i / segs) * math.pi * 2
-		P(rift, { Name = "Seg", Size = Vector3.new(3, 10, 3), CFrame = CFrame.new(center) * CFrame.Angles(0, 0, a) * CFrame.new(0, 45, 0), Color = (i % 2 == 0) and Color3.fromRGB(0, 255, 225) or Color3.fromRGB(190, 90, 255), Material = Enum.Material.Neon, CanCollide = false, CastShadow = false })
-	end
-	emitter(ringHolder, "Vortex", Color3.fromRGB(140, 90, 255), 2).Size = VFX.NS(0, 40, 1, 80)
-	rift.PrimaryPart = ringHolder
-	spin(rift, 8)
-	rift:SetAttribute("SpinAxis", "Z")
-	rift.Parent = hub
 end
 
 ---------------------------------------------------------------------
--- TRAIN AREA
+-- TRAINING GROUNDS (west island)
 ---------------------------------------------------------------------
 local function buildTrain(map)
-	local train = folder("TrainArea", root)
-	local count = #Config.TrainPads
-	local startX = -110
-	local spacing = 24
-	local endX = startX - (count - 1) * spacing
-	local centerX = (startX + endX) / 2
-	P(train, { Name = "Platform", Size = Vector3.new(math.abs(endX - startX) + 40, 1, 56), CFrame = CFrame.new(centerX, 0.4, 0), Color = Color3.fromRGB(175, 165, 180), Material = Enum.Material.Slate })
-	P(train, { Name = "Trim", Size = Vector3.new(math.abs(endX - startX) + 42, 0.6, 58), CFrame = CFrame.new(centerX, 0.2, 0), Color = Color3.fromRGB(255, 130, 190), Material = Enum.Material.Neon, Transparency = 0.3 })
-	local sign = P(train, { Name = "Sign", Size = Vector3.new(1, 1, 1), Transparency = 1, CanCollide = false, CFrame = CFrame.new(startX + 12, 0, -22) })
-	billboard(sign, "TRAIN AREA", "Swing or stand on a pad to gain Power", Color3.fromRGB(120, 255, 170), 10, 1.2, 18)
-	map.TrainCFrame = CFrame.new(startX + 8, 4, 0) * CFrame.Angles(0, math.rad(90), 0)
-	poi(sign, "Train Grounds", "Power", "Stand on a pad or swing to gain Power.", "Train", { Frame = 0, Travel = "Train" })
+	local train = folder("TrainingGrounds", root)
+	local c = W.TrainCenter
+	bridge(train, Vector3.new(-W.PlazaRadius + 2, 1.2, 0), Vector3.new(c.X + 60, 1.2, 0), 16, Color3.fromRGB(120, 255, 170))
+	disc(train, c + Vector3.new(0, 0.5, 0), 124, 2, STONE, Enum.Material.Slate, "Island")
+	disc(train, c + Vector3.new(0, 1.6, 0), 118, 0.12, Color3.fromRGB(120, 255, 170), Enum.Material.Neon, "IslandGlow").Transparency = 0.6
+	local sign = P(train, { Name = "Sign", Size = Vector3.new(1, 1, 1), Transparency = 1, CanCollide = false, CFrame = CFrame.new(c + Vector3.new(50, 1.6, 0)) })
+	billboard(sign, "TRAINING GROUNDS", "Pads unlock with Rebirths & Ascensions", Color3.fromRGB(120, 255, 170), 10, 1.2, 18)
+	map.TrainCFrame = CFrame.new(c + Vector3.new(44, 5, 0)) * CFrame.Angles(0, math.rad(90), 0)
+	poi(sign, "Training Grounds", "Power", "Stand on a pad or swing to gain Power. Bigger pads unlock with Rebirths and Ascensions.", "Train", { Frame = 0, Travel = "Train" })
 
 	map.TrainPads = {}
+	local count = #Config.TrainPads
 	for i, pad in ipairs(Config.TrainPads) do
-		local pos = Vector3.new(startX - (i - 1) * spacing, 1, 0)
-		local base = disc(train, pos, Config.TrainPadRadius * 2 + 1.2, 0.3, Color3.fromRGB(40, 35, 50), Enum.Material.Metal, "PadBase")
+		-- pads sweep in an arc from the bridge side around the island
+		local a = math.rad(-150 + (i - 1) * (300 / (count - 1)))
+		local pos = c + Vector3.new(-math.cos(a) * 36, 1.7, math.sin(a) * 36)
+		local base = disc(train, pos, Config.TrainPadRadius * 2 + 1.6, 0.3, STONE_DARK, Enum.Material.Metal, "PadBase")
 		local glow = disc(train, pos + Vector3.new(0, 0.15, 0), Config.TrainPadRadius * 2, 0.25, pad.Color, Enum.Material.Neon, "Pad")
-		glow.Transparency = 0.35
+		glow.Transparency = 0.4
 		glow:SetAttribute("PadIndex", i)
 		glow:SetAttribute("Mult", pad.Mult)
-		glow:SetAttribute("PowerReq", pad.Power)
 		glow:SetAttribute("RebirthReq", pad.Rebirths)
+		glow:SetAttribute("AscensionReq", pad.Ascensions)
 		CollectionService:AddTag(glow, "TrainPad")
-		emitter(glow, "Rise", pad.Color, 3 + i)
-		light(glow, pad.Color, 16, 1.2)
+		emitter(glow, "Rise", pad.Color, 2 + i)
+		light(glow, pad.Color, 16, 1.1)
 		local req = "Free"
-		if pad.Rebirths > 0 then
+		if pad.Ascensions > 0 then
+			req = pad.Ascensions .. " Ascension" .. (pad.Ascensions > 1 and "s" or "")
+		elseif pad.Rebirths > 0 then
 			req = pad.Rebirths .. " Rebirth" .. (pad.Rebirths > 1 and "s" or "")
-		elseif pad.Power > 0 then
-			req = Format.Abbrev(pad.Power) .. " Power"
 		end
-		billboard(base, "x" .. Format.Abbrev(pad.Mult), req, pad.Color, 7, 0.7)
-		-- training dummy behind each pad
-		local dpos = pos + Vector3.new(0, 0, -16)
-		P(train, { Name = "DummyPost", Size = Vector3.new(0.8, 6, 0.8), CFrame = CFrame.new(dpos + Vector3.new(0, 3, 0)), Color = Color3.fromRGB(110, 75, 50), Material = Enum.Material.Wood })
-		P(train, { Name = "Dummy", Shape = Enum.PartType.Cylinder, Size = Vector3.new(4, 2.6, 2.6), CFrame = CFrame.new(dpos + Vector3.new(0, 5, 0)) * FLAT, Color = Color3.fromRGB(210, 180, 130), Material = Enum.Material.Fabric })
-		P(train, { Name = "DummyHead", Shape = Enum.PartType.Ball, Size = Vector3.one * 2, CFrame = CFrame.new(dpos + Vector3.new(0, 7.8, 0)), Color = Color3.fromRGB(210, 180, 130), Material = Enum.Material.Fabric })
+		billboard(base, "x" .. Format.Abbrev(pad.Mult), req, pad.Color, 6, 0.7)
 		table.insert(map.TrainPads, { Part = glow, Config = pad, Index = i, Position = pos })
 	end
 end
 
 ---------------------------------------------------------------------
--- PORTALS
+-- BOSS RUSH ARENA (east island)
 ---------------------------------------------------------------------
-local function buildPortals(map)
-	local portals = folder("Portals", root)
-	map.Portals = {}
-	for i, zone in ipairs(Config.Zones) do
-		local x = -64 + (i - 1) * 32
-		local base = CFrame.new(x, 0, -118)
-		local accent = zone.Accent or WHITE
-		local stone = Color3.fromRGB(70, 65, 85)
-		P(portals, { Name = "Step", Size = Vector3.new(22, 1, 10), CFrame = base * CFrame.new(0, 0.5, 0), Color = stone, Material = Enum.Material.Slate })
-		for _, side in ipairs({ -1, 1 }) do
-			P(portals, { Name = "Pillar", Size = Vector3.new(2.6, 18, 2.6), CFrame = base * CFrame.new(side * 8.5, 9.5, 0), Color = stone, Material = Enum.Material.Slate })
-			P(portals, { Name = "PillarGlow", Size = Vector3.new(0.5, 16, 2.7), CFrame = base * CFrame.new(side * 7.1, 9.5, 0), Color = accent, Material = Enum.Material.Neon })
+local function buildBossRush(map)
+	local br = folder("BossRush", root)
+	local c = W.BossRushCenter
+	local purple = Color3.fromRGB(200, 110, 255)
+	bridge(br, Vector3.new(W.PlazaRadius - 2, 1.2, 0), Vector3.new(c.X - 50, 1.2, 0), 16, purple)
+	disc(br, c + Vector3.new(0, 0.5, 0), 104, 2, STONE_DARK, Enum.Material.Slate, "Island")
+	disc(br, c + Vector3.new(0, 1.6, 0), 60, 0.12, purple, Enum.Material.Neon, "Glyph").Transparency = 0.7
+	for i = 1, 12 do
+		local a = (i / 12) * math.pi * 2
+		local pos = c + Vector3.new(math.cos(a) * 46, 0, math.sin(a) * 46)
+		if math.cos(a) > -0.85 then
+			P(br, { Name = "Pillar", Size = Vector3.new(3, 18, 3), CFrame = CFrame.new(pos + Vector3.new(0, 10, 0)), Color = STONE, Material = Enum.Material.Slate })
+			local flame = P(br, { Name = "Flame", Shape = Enum.PartType.Ball, Size = Vector3.one * 1.6, CFrame = CFrame.new(pos + Vector3.new(0, 19.6, 0)), Color = purple, Material = Enum.Material.Neon, CanCollide = false })
+			emitter(flame, "Fire", purple, 8)
+			if i % 3 == 0 then
+				CollectionService:AddTag(light(flame, purple, 22, 1.4, true), "Flicker")
+			end
 		end
-		P(portals, { Name = "Lintel", Size = Vector3.new(22, 2.4, 3.2), CFrame = base * CFrame.new(0, 19.4, 0), Color = stone, Material = Enum.Material.Slate })
-		local surface = P(portals, {
-			Name = "Portal_" .. zone.Id,
-			Shape = Enum.PartType.Cylinder,
-			Size = Vector3.new(0.6, 14.5, 14.5),
-			CFrame = base * CFrame.new(0, 9.5, 0) * CFrame.Angles(0, math.rad(90), 0),
-			Color = zone.ComingSoon and Color3.fromRGB(90, 90, 100) or accent,
-			Material = Enum.Material.Neon,
-			Transparency = zone.ComingSoon and 0.6 or 0.25,
-			CanCollide = zone.ComingSoon == true,
-		})
-		surface:SetAttribute("Zone", zone.Id)
-		if not zone.ComingSoon then
-			emitter(surface, "Vortex", accent, 3).Size = VFX.NS(0, 8, 1, 14)
-			emitter(surface, "Sparks", accent, 8).Speed = NumberRange.new(4, 10)
-			light(surface, accent, 26, 2.5, true)
-			loopSound(surface, "rbxasset://sounds/action_swim.mp3", 0.25, 0.22)
-		end
-		local sub
-		if zone.ComingSoon then
-			sub = "COMING SOON"
-		elseif zone.BladeReq > 0 then
-			sub = "Requires Blade +" .. zone.BladeReq
-		else
-			sub = "Stages 1-" .. Config.StagesPerZone
-		end
-		billboard(surface, zone.Name, sub, accent, 12, 0.85)
-		poi(surface, zone.Name, "Travel", zone.ComingSoon and "Coming soon." or ("Dungeon portal. " .. sub .. "."), "Portals", { Frame = zone.ComingSoon and 0 or 18 })
-		map.Portals[zone.Id] = surface
 	end
-end
-
----------------------------------------------------------------------
--- TOWER
----------------------------------------------------------------------
-local function buildTower(map)
-	local tower = folder("Tower", root)
-	local c = Vector3.new(160, 0, 0)
-	local purple = Color3.fromRGB(90, 60, 140)
-	disc(tower, c + Vector3.new(0, 1, 0), 40, 2, Color3.fromRGB(70, 65, 85), Enum.Material.Slate, "TowerBase")
-	P(tower, { Name = "TowerBody", Shape = Enum.PartType.Cylinder, Size = Vector3.new(120, 26, 26), CFrame = CFrame.new(c + Vector3.new(0, 62, 0)) * FLAT, Color = purple, Material = Enum.Material.Brick })
-	for h = 16, 112, 16 do
-		disc(tower, c + Vector3.new(0, h, 0), 27.4, 0.8, Color3.fromRGB(200, 120, 255), Enum.Material.Neon, "TowerRing")
-	end
-	P(tower, { Name = "TowerCap", Shape = Enum.PartType.Ball, Size = Vector3.new(30, 16, 30), CFrame = CFrame.new(c + Vector3.new(0, 122, 0)), Color = Color3.fromRGB(60, 40, 100), Material = Enum.Material.Slate })
-	local crystal = P(tower, { Name = "TowerCrystal", Size = Vector3.new(6, 12, 6), CFrame = CFrame.new(c + Vector3.new(0, 140, 0)) * CFrame.Angles(0, 0, math.rad(45)), Color = Color3.fromRGB(220, 150, 255), Material = Enum.Material.Neon, CanCollide = false })
-	spin(crystal, 40, 2)
-	light(crystal, Color3.fromRGB(210, 140, 255), 60, 3, true)
-	emitter(crystal, "Stars", Color3.fromRGB(220, 160, 255), 5)
-	local door = P(tower, { Name = "TowerDoor", Size = Vector3.new(1, 14, 9), CFrame = CFrame.new(c + Vector3.new(-13.2, 9, 0)), Color = Color3.fromRGB(200, 120, 255), Material = Enum.Material.Neon, Transparency = 0.2 })
-	emitter(door, "Vortex", Color3.fromRGB(180, 110, 255), 2)
-	billboard(door, "INFINITE TOWER", "Beat the Guardian before time runs out", Color3.fromRGB(220, 160, 255), 12, 1.1)
-	local pp = prompt(door, "Enter Tower", "Infinite Tower", "TowerPrompt", "Tower")
-	poi(door, "Infinite Tower", "Travel", "Beat each floor's Guardian before time runs out.", "Tower", { Frame = 30, Travel = "Tower" })
+	local gate = P(br, { Name = "RushGate", Size = Vector3.new(1, 16, 12), CFrame = CFrame.new(c + Vector3.new(0, 9.6, 0)) * CFrame.Angles(0, math.rad(90), 0), Color = purple, Material = Enum.Material.ForceField, Transparency = 0.1, CanCollide = false })
+	emitter(gate, "Vortex", purple, 2)
+	light(gate, purple, 30, 2, true)
+	billboard(gate, "BOSS RUSH", "Endless bosses. How far can you go?", Color3.fromRGB(220, 160, 255), 11, 1.1, 16)
+	local pp = prompt(gate, "Enter Boss Rush", "Boss Rush", "TowerPrompt", "Tower")
 	pp.HoldDuration = 0.4
 	map.TowerPrompt = pp
-	map.TowerCFrame = CFrame.new(c + Vector3.new(-22, 4, 0)) * CFrame.Angles(0, math.rad(90), 0)
+	map.TowerCFrame = CFrame.new(c + Vector3.new(-30, 5, 0)) * CFrame.Angles(0, math.rad(-90), 0)
+	poi(gate, "Boss Rush", "Danger", "Fight bosses back to back. Opens after stage " .. Config.BossRush.StageReq .. ".", "BossRush", { Frame = 30, Travel = "Tower" })
 end
 
 ---------------------------------------------------------------------
--- DUNGEONS (one linear hall per zone, stage rooms behind power gates)
+-- THE PATH (north)
 ---------------------------------------------------------------------
-local ROOM_LEN = Config.DungeonLayout.RoomLen
-local ROOM_W = Config.DungeonLayout.RoomWidth
-local START_LEN = Config.DungeonLayout.StartLen
-local WALL_H = 26
-local DOOR_W = 24
-local DOOR_H = 18
+local WALL_H = 7
 
-local ZONE_ORIGINS = Config.DungeonLayout.Origins
-
-local function decorateRoom(parent, zone, center: Vector3, rng: Random)
-	if zone.Style == "Creature" then
-		-- ruined academy: broken pillars, desks, vines, a cherry tree
-		for _ = 1, 6 do
-			local x = rng:NextNumber(-32, 32)
-			local z = rng:NextNumber(-40, 40)
-			if math.abs(x) > 10 then
-				local h = rng:NextNumber(5, 16)
-				P(parent, { Name = "RuinPillar", Shape = Enum.PartType.Cylinder, Size = Vector3.new(h, 3.2, 3.2), CFrame = CFrame.new(center + Vector3.new(x, h / 2, z)) * FLAT, Color = zone.Wall, Material = Enum.Material.Marble })
-			end
+local function stageDecor(parent, zone, stageIndex: number, center: Vector3, len: number, rng: Random)
+	local half = W.PathWidth / 2
+	-- two or three simple props per stage, on the edges (keeps the road clear)
+	for _ = 1, 3 do
+		local side = rng:NextNumber() < 0.5 and -1 or 1
+		local x = side * rng:NextNumber(half - 12, half - 5)
+		local z = center.Z + rng:NextNumber(-len / 2 + 10, len / 2 - 10)
+		if zone.Id == 1 then
+			local h = rng:NextNumber(6, 14)
+			P(parent, { Name = "RuinPillar", Shape = Enum.PartType.Cylinder, Size = Vector3.new(h, 3, 3), CFrame = CFrame.new(x, h / 2, z) * FLAT, Color = zone.Wall, Material = Enum.Material.Marble })
+		elseif zone.Id == 2 then
+			local crate = P(parent, { Name = "Container", Size = Vector3.new(7, 6, 12), CFrame = CFrame.new(x, 3, z) * CFrame.Angles(0, rng:NextNumber(-0.3, 0.3), 0), Color = Color3.fromRGB(60, 70, 90), Material = Enum.Material.CorrodedMetal })
+			P(parent, { Name = "Stripe", Size = Vector3.new(7.1, 0.3, 12.1), CFrame = crate.CFrame * CFrame.new(0, 1.8, 0), Color = zone.Accent, Material = Enum.Material.Neon, CanCollide = false })
+		elseif zone.Id == 3 then
+			cherryTree(parent, Vector3.new(x, 0, z), rng:NextNumber(0.9, 1.2), rng)
+		elseif zone.Id == 4 then
+			local shard = P(parent, { Name = "StarShard", Size = Vector3.new(2, rng:NextNumber(5, 10), 2), CFrame = CFrame.new(x, 4, z) * CFrame.Angles(rng:NextNumber(-0.3, 0.3), rng:NextNumber(0, 3), rng:NextNumber(-0.3, 0.3)), Color = zone.Accent, Material = Enum.Material.Neon, CanCollide = false })
+			shard.Transparency = 0.2
+		elseif zone.Id == 5 then
+			P(parent, { Name = "IceSpire", Size = Vector3.new(3, rng:NextNumber(7, 14), 3), CFrame = CFrame.new(x, 4, z) * CFrame.Angles(0, rng:NextNumber(0, 3), rng:NextNumber(-0.2, 0.2)), Color = Color3.fromRGB(180, 220, 245), Material = Enum.Material.Glacier })
+		else
+			local obelisk = P(parent, { Name = "Obelisk", Size = Vector3.new(2.5, rng:NextNumber(8, 14), 2.5), CFrame = CFrame.new(x, 5, z), Color = zone.Wall, Material = Enum.Material.Basalt })
+			P(parent, { Name = "Rune", Size = Vector3.new(2.6, 0.4, 2.6), CFrame = obelisk.CFrame * CFrame.new(0, 2, 0), Color = zone.Accent, Material = Enum.Material.Neon, CanCollide = false })
 		end
-		for _ = 1, 4 do
-			local x = rng:NextNumber(-30, 30)
-			local z = rng:NextNumber(-38, 38)
-			P(parent, { Name = "Desk", Size = Vector3.new(4, 0.4, 2.4), CFrame = CFrame.new(center + Vector3.new(x, 2.4, z)) * CFrame.Angles(0, rng:NextNumber(0, 3), rng:NextNumber(-0.3, 0.3)), Color = Color3.fromRGB(150, 110, 70), Material = Enum.Material.Wood, CanCollide = false })
-		end
-		cherryTree(parent, center + Vector3.new(rng:NextNumber(-30, -24), 0, rng:NextNumber(-30, 30)), 1, rng)
-		for _ = 1, 3 do
-			local g = P(parent, { Name = "Crystal", Size = Vector3.new(1.4, 3.5, 1.4), CFrame = CFrame.new(center + Vector3.new(rng:NextNumber(-34, 34), 1.5, rng:NextNumber(-44, 44))) * CFrame.Angles(0.3, rng:NextNumber(0, 3), 0.4), Color = zone.Accent, Material = Enum.Material.Neon, CanCollide = false })
-			light(g, zone.Accent, 12, 1)
-		end
-	else
-		-- neon mecha docks: containers, floor strips, crane beams
-		local colors = { Color3.fromRGB(220, 70, 60), Color3.fromRGB(60, 120, 220), Color3.fromRGB(230, 170, 50) }
-		for _ = 1, 5 do
-			local x = rng:NextNumber(-30, 30)
-			local z = rng:NextNumber(-38, 38)
-			if math.abs(x) > 12 then
-				local crate = P(parent, { Name = "Container", Size = Vector3.new(8, 7, 16), CFrame = CFrame.new(center + Vector3.new(x, 3.5, z)) * CFrame.Angles(0, rng:NextNumber(-0.4, 0.4), 0), Color = colors[rng:NextInteger(1, 3)], Material = Enum.Material.CorrodedMetal })
-				P(parent, { Name = "Stripe", Size = Vector3.new(8.1, 0.4, 16.1), CFrame = crate.CFrame * CFrame.new(0, 2, 0), Color = zone.Accent, Material = Enum.Material.Neon, CanCollide = false })
-			end
-		end
-		for _, side in ipairs({ -1, 1 }) do
-			P(parent, { Name = "FloorStrip", Size = Vector3.new(0.6, 0.2, ROOM_LEN - 4), CFrame = CFrame.new(center + Vector3.new(side * (ROOM_W / 2 - 4), 0.1, 0)), Color = side < 0 and zone.Accent or Color3.fromRGB(255, 60, 200), Material = Enum.Material.Neon, CanCollide = false })
-		end
-		local beam = P(parent, { Name = "CraneBeam", Size = Vector3.new(ROOM_W, 2, 2), CFrame = CFrame.new(center + Vector3.new(0, WALL_H + 2, rng:NextNumber(-20, 20))), Color = Color3.fromRGB(230, 170, 50), Material = Enum.Material.DiamondPlate })
-		light(beam, zone.Accent, 30, 1.5, true)
 	end
+	local _ = stageIndex
 end
 
-local function buildDungeon(map, zone)
-	local origin = ZONE_ORIGINS[zone.Id]
-	if not origin then
-		return
-	end
-	local df = folder("Dungeon_" .. zone.Id, root)
-	local stageCount = Config.StagesPerZone
-	local firstStage = (zone.Id - 1) * stageCount + 1
-	local totalLen = START_LEN + ROOM_LEN * stageCount
-	local zCenter = origin.Z + START_LEN / 2 - totalLen / 2
-	local rng = Random.new(zone.Id * 1000)
-
-	P(df, { Name = "Floor", Size = Vector3.new(ROOM_W, 2, totalLen), CFrame = CFrame.new(origin.X, -1, zCenter), Color = zone.Floor, Material = zone.Style == "Creature" and Enum.Material.Grass or Enum.Material.DiamondPlate })
+local function gateArch(parent, z: number, zone, stage, stageIndex: number)
+	local half = W.PathWidth / 2
+	local h = stage.Boss and 30 or 22
 	for _, side in ipairs({ -1, 1 }) do
-		P(df, { Name = "SideWall", Size = Vector3.new(4, WALL_H, totalLen), CFrame = CFrame.new(origin.X + side * (ROOM_W / 2 + 2), WALL_H / 2, zCenter), Color = zone.Wall, Material = zone.Style == "Creature" and Enum.Material.Brick or Enum.Material.Metal })
-		P(df, { Name = "WallTrim", Size = Vector3.new(4.2, 0.8, totalLen), CFrame = CFrame.new(origin.X + side * (ROOM_W / 2 + 2), WALL_H, zCenter), Color = zone.Accent, Material = Enum.Material.Neon })
+		P(parent, { Name = "ArchPillar", Size = Vector3.new(4, h, 4), CFrame = CFrame.new(side * (half - 2), h / 2, z), Color = zone.Wall, Material = Enum.Material.Slate })
+		P(parent, { Name = "ArchGlow", Size = Vector3.new(0.4, h - 2, 4.2), CFrame = CFrame.new(side * (half - 4.2), h / 2, z), Color = zone.Accent, Material = Enum.Material.Neon, CanCollide = false })
 	end
-	P(df, { Name = "BackWall", Size = Vector3.new(ROOM_W + 8, WALL_H, 4), CFrame = CFrame.new(origin.X, WALL_H / 2, origin.Z + START_LEN / 2 + 2), Color = zone.Wall, Material = Enum.Material.Slate })
-	P(df, { Name = "EndWall", Size = Vector3.new(ROOM_W + 8, WALL_H, 4), CFrame = CFrame.new(origin.X, WALL_H / 2, origin.Z + START_LEN / 2 - totalLen - 2), Color = zone.Wall, Material = Enum.Material.Slate })
-
-	-- wall sconces: warm pools of light with real shadows (every other one
-	-- casts shadows to keep the light budget sane) that gently flicker
-	local flameColor = zone.Style == "Creature" and Color3.fromRGB(255, 190, 110) or zone.Accent
-	local count = 0
-	for z = origin.Z + START_LEN / 2 - 20, origin.Z + START_LEN / 2 - totalLen + 10, -40 do
-		for _, side in ipairs({ -1, 1 }) do
-			count += 1
-			local x = origin.X + side * (ROOM_W / 2 - 0.6)
-			P(df, { Name = "SconceBracket", Size = Vector3.new(1.2, 0.5, 1.6), CFrame = CFrame.new(x, 11, z), Color = Color3.fromRGB(40, 36, 42), Material = Enum.Material.Metal })
-			local flame = P(df, { Name = "SconceFlame", Shape = Enum.PartType.Ball, Size = Vector3.one * 1.1, CFrame = CFrame.new(x - side * 0.4, 12, z), Color = flameColor, Material = Enum.Material.Neon, CanCollide = false, CastShadow = false })
-			local l = light(flame, flameColor, 22, 1.3, count % 2 == 0)
-			CollectionService:AddTag(l, "Flicker")
-			emitter(flame, "Fire", flameColor, 3).Size = VFX.NS(0, 0.6, 1, 0)
-		end
+	local lintel = P(parent, { Name = "Lintel", Size = Vector3.new(W.PathWidth, 5, 4), CFrame = CFrame.new(0, h + 2.5, z), Color = zone.Wall, Material = Enum.Material.Slate })
+	for _, face in ipairs({ Enum.NormalId.Front, Enum.NormalId.Back }) do
+		local sg = Instance.new("SurfaceGui")
+		sg.Face = face
+		sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+		sg.PixelsPerStud = 24
+		sg.LightInfluence = 0
+		sg.Parent = lintel
+		local t = Instance.new("TextLabel")
+		t.BackgroundTransparency = 1
+		t.Size = UDim2.fromScale(1, 1)
+		t.Font = Config.Fonts.Display
+		t.TextScaled = true
+		t.RichText = true
+		t.Text = string.format('STAGE %d  <font color="#ffffff">%s</font>', stageIndex, stage.Boss and ("BOSS: " .. stage.Enemy) or stage.Enemy)
+		t.TextColor3 = stage.Boss and Color3.fromRGB(255, 90, 110) or zone.Accent
+		t.Parent = sg
 	end
+	-- the gate itself (opened per player on their own client)
+	local gate = P(parent, { Name = "Gate_" .. stageIndex, Size = Vector3.new(W.PathWidth - 8, h, 1.2), CFrame = CFrame.new(0, h / 2, z), Color = stage.Boss and Color3.fromRGB(255, 60, 80) or zone.Accent, Material = Enum.Material.ForceField, Transparency = 0.15, CanCollide = true })
+	gate:SetAttribute("Stage", stageIndex)
+	CollectionService:AddTag(gate, "StageGate")
+	billboard(gate, stageIndex == 1 and "OPEN" or ("CLEAR STAGE " .. (stageIndex - 1)), nil, Color3.fromRGB(255, 240, 200), 0, 0.8, 14).Name = "GateLabel"
+	return gate
+end
 
-	-- start area: return portal + title
-	local ret = P(df, { Name = "ReturnPortal", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.6, 12, 12), CFrame = CFrame.new(origin + Vector3.new(0, 7, START_LEN / 2 - 3)) * CFrame.Angles(0, math.rad(90), 0), Color = Color3.fromRGB(255, 150, 210), Material = Enum.Material.Neon, Transparency = 0.25, CanCollide = false })
-	emitter(ret, "Vortex", Color3.fromRGB(255, 150, 210), 2).Size = VFX.NS(0, 6, 1, 10)
-	billboard(ret, "RETURN TO HUB", nil, Color3.fromRGB(255, 170, 220), 9, 0.7)
-	CollectionService:AddTag(ret, "ReturnPortal")
-	poi(ret, "Return Portal", "Travel", "Back to the hub.", "Z" .. zone.Id, { Frame = 0 })
-	local titleHolder = P(df, { Name = "ZoneTitle", Size = Vector3.one, Transparency = 1, CanCollide = false, CFrame = CFrame.new(origin + Vector3.new(0, 16, 0)) })
-	billboard(titleHolder, zone.Name, "Zone " .. zone.Id, zone.Accent, 0, 1.3, 26)
-
-	local dungeon = { Zone = zone, Origin = origin, StartCFrame = CFrame.new(origin + Vector3.new(0, 4, 18)), Stages = {} }
-
-	for i = 1, stageCount do
-		local stageIndex = firstStage + i - 1
-		local stage = Config.Stages[stageIndex]
-		local gateZ = origin.Z + START_LEN / 2 - START_LEN - (i - 1) * ROOM_LEN
-		local center = Vector3.new(origin.X, 0, gateZ - ROOM_LEN / 2)
-
-		-- cross wall with doorway
-		local segW = (ROOM_W - DOOR_W) / 2
+local function buildPath(map)
+	local path = folder("ThePath", root)
+	map.Path = { Stages = {} }
+	-- bridge from the plaza to the first gate
+	bridge(path, Vector3.new(0, 1.2, -W.PlazaRadius + 2), Vector3.new(0, 1.2, W.PathStartZ + 2), 22, TRIM)
+	torii(path, CFrame.new(0, 1.2, -W.PlazaRadius - 6), 26, 20) -- the path entrance
+	local half = W.PathWidth / 2
+	for i, stage in ipairs(Config.Stages) do
+		local zone = Config.Zones[stage.Zone]
+		local zStart, zEnd, center = Config.StageBounds(i)
+		local len = zStart - zEnd
+		local stageFolder = folder("Stage_" .. i, path)
+		local rng = Random.new(i * 97)
+		P(stageFolder, { Name = "Floor", Size = Vector3.new(W.PathWidth, 2, len), CFrame = CFrame.new(0, -1 + 1.6, center.Z), Color = zone.Floor, Material = zone.Id == 5 and Enum.Material.Snow or (zone.Id == 2 and Enum.Material.DiamondPlate or Enum.Material.Slate) })
 		for _, side in ipairs({ -1, 1 }) do
-			P(df, { Name = "CrossWall", Size = Vector3.new(segW, WALL_H, 3), CFrame = CFrame.new(origin.X + side * (DOOR_W / 2 + segW / 2), WALL_H / 2, gateZ), Color = zone.Wall, Material = Enum.Material.Slate })
+			P(stageFolder, { Name = "Wall", Size = Vector3.new(3, WALL_H, len), CFrame = CFrame.new(side * (half + 1.5), WALL_H / 2, center.Z), Color = zone.Wall, Material = Enum.Material.Slate })
+			P(stageFolder, { Name = "WallTrim", Size = Vector3.new(3.2, 0.4, len), CFrame = CFrame.new(side * (half + 1.5), WALL_H, center.Z), Color = zone.Accent, Material = Enum.Material.Neon, CanCollide = false })
+			-- invisible upper wall keeps players on the road
+			P(stageFolder, { Name = "Barrier", Size = Vector3.new(2, 40, len), CFrame = CFrame.new(side * (half + 1.5), WALL_H + 20, center.Z), Transparency = 1 })
 		end
-		local lintel = P(df, { Name = "Lintel", Size = Vector3.new(DOOR_W, WALL_H - DOOR_H, 3), CFrame = CFrame.new(origin.X, DOOR_H + (WALL_H - DOOR_H) / 2, gateZ), Color = zone.Wall, Material = Enum.Material.Slate })
-		for _, face in ipairs({ Enum.NormalId.Front, Enum.NormalId.Back }) do
-			local sg = Instance.new("SurfaceGui")
-			sg.Face = face
-			sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-			sg.PixelsPerStud = 30
-			sg.LightInfluence = 0
-			sg.Parent = lintel
-			local t = Instance.new("TextLabel")
-			t.BackgroundTransparency = 1
-			t.Size = UDim2.fromScale(1, 1)
-			t.Font = Enum.Font.LuckiestGuy
-			t.TextScaled = true
-			t.RichText = true
-			t.Text = string.format('STAGE %d<br/><font size="30" color="#ffffff">%s</font>', stageIndex, stage.Boss and ("BOSS: " .. stage.Enemy) or stage.Enemy)
-			t.TextColor3 = zone.Accent
-			t.Parent = sg
+		-- sconces with flickering, shadow-casting light
+		for z = zStart - 20, zEnd + 10, -40 do
+			for _, side in ipairs({ -1, 1 }) do
+				local flame = P(stageFolder, { Name = "Sconce", Shape = Enum.PartType.Ball, Size = Vector3.one * 1.1, CFrame = CFrame.new(side * (half - 0.2), WALL_H + 1.4, z), Color = zone.Accent, Material = Enum.Material.Neon, CanCollide = false, CastShadow = false })
+				CollectionService:AddTag(light(flame, zone.Accent, 24, 1.2, side == 1), "Flicker")
+			end
 		end
+		local gate = gateArch(stageFolder, zStart, zone, stage, i)
+		if stage.Boss then
+			local arena = disc(stageFolder, center + Vector3.new(0, 1.62, 0), 60, 0.1, Color3.fromRGB(255, 60, 80), Enum.Material.Neon, "BossArena")
+			arena.Transparency = 0.75
+			arena.CanCollide = false
+			poi(arena, "BOSS: " .. stage.Enemy, "Danger", "Stage " .. i .. " boss.", "S" .. i, { Frame = 0, Travel = "Stage_" .. i })
+		end
+		if (i - 1) % Config.StagesPerZone == 0 then
+			local titleHolder = P(stageFolder, { Name = "ZoneTitle", Size = Vector3.one, Transparency = 1, CanCollide = false, CFrame = CFrame.new(0, 12, zStart - 14) })
+			billboard(titleHolder, zone.Name, "Zone " .. zone.Id, zone.Accent, 0, 1.3, 30)
+		end
+		stageDecor(stageFolder, zone, i, center, len, rng)
 
-		local gate = P(df, { Name = "Gate_" .. stageIndex, Size = Vector3.new(DOOR_W, DOOR_H, 1.4), CFrame = CFrame.new(origin.X, DOOR_H / 2, gateZ), Color = stage.Boss and Color3.fromRGB(255, 60, 80) or zone.Accent, Material = Enum.Material.ForceField, Transparency = 0.1, CanCollide = true })
-		gate:SetAttribute("Stage", stageIndex)
-		gate:SetAttribute("PowerReq", stage.PowerReq)
-		CollectionService:AddTag(gate, "StageGate")
-		billboard(gate, stage.PowerReq > 0 and ("LOCKED - " .. Format.Abbrev(stage.PowerReq) .. " Power") or "OPEN", nil, Color3.fromRGB(255, 240, 200), 0, 0.8).Name = "GateLabel"
-
-		-- room trigger volume (client uses it for stage banners / lighting)
-		local room = P(df, { Name = "Room_" .. stageIndex, Size = Vector3.new(ROOM_W, WALL_H, ROOM_LEN), CFrame = CFrame.new(center + Vector3.new(0, WALL_H / 2, 0)), Transparency = 1, CanCollide = false, CanQuery = false, CanTouch = false })
-		room:SetAttribute("Stage", stageIndex)
-		room:SetAttribute("Zone", zone.Id)
+		local room = P(stageFolder, { Name = "Room_" .. i, Size = Vector3.new(W.PathWidth, 30, len), CFrame = CFrame.new(0, 15, center.Z), Transparency = 1, CanCollide = false, CanQuery = false, CanTouch = false })
+		room:SetAttribute("Stage", i)
+		room:SetAttribute("Zone", stage.Zone)
 		CollectionService:AddTag(room, "StageRoom")
 
-		decorateRoom(df, zone, center, rng)
-		if stage.Boss then
-			local arena = disc(df, center + Vector3.new(0, 0.1, 0), 50, 0.2, Color3.fromRGB(255, 60, 80), Enum.Material.Neon, "BossArena")
-			arena.Transparency = 0.7
-			arena.CanCollide = false
-			poi(arena, "BOSS: " .. stage.Enemy, "Danger", "Stage " .. stageIndex .. " boss arena.", "S" .. stageIndex, { Frame = 0, Travel = "Stage_" .. stageIndex })
-		end
-
-		dungeon.Stages[stageIndex] = {
+		map.Path.Stages[i] = {
 			Stage = stage,
-			Center = center,
-			SpawnMin = center + Vector3.new(-ROOM_W / 2 + 10, 0, -ROOM_LEN / 2 + 12),
-			SpawnMax = center + Vector3.new(ROOM_W / 2 - 10, 0, ROOM_LEN / 2 - 12),
-			Entry = CFrame.new(Vector3.new(origin.X, 4, gateZ - 8)) * CFrame.Angles(0, 0, 0),
+			Center = center + Vector3.new(0, 1.6, 0),
+			SpawnMin = Vector3.new(-half + 8, 1.6, zEnd + 8),
+			SpawnMax = Vector3.new(half - 8, 1.6, zStart - 14),
+			Entry = CFrame.new(0, 5, zStart - 8),
 			Gate = gate,
 			Room = room,
 		}
 	end
-	map.Dungeons[zone.Id] = dungeon
+	-- end wall
+	local _, lastEnd = Config.StageBounds(#Config.Stages)
+	P(path, { Name = "EndWall", Size = Vector3.new(W.PathWidth + 6, 40, 4), CFrame = CFrame.new(0, 20, lastEnd - 2), Color = STONE_DARK, Material = Enum.Material.Slate })
 end
 
 ---------------------------------------------------------------------
--- WEAPON CHEST SHRINE (hub)
+-- AMBIENT PARTICLES (fog, dust, embers, petals) - one volume per area
 ---------------------------------------------------------------------
-buildChestShrine = function(map)
-	local shrine = Instance.new("Model")
-	shrine.Name = "ChestShrine"
-	local c = Vector3.new(0, 0, 58)
-	local gold = Color3.fromRGB(255, 200, 70)
-	disc(shrine, c + Vector3.new(0, 0.6, 0), 16, 1.2, Color3.fromRGB(60, 45, 70), Enum.Material.Marble, "ShrineBase")
-	disc(shrine, c + Vector3.new(0, 1.25, 0), 13, 0.15, gold, Enum.Material.Neon, "ShrineGlow").Transparency = 0.4
-	local base = P(shrine, { Name = "ChestBase", Size = Vector3.new(7, 3.2, 4.5), CFrame = CFrame.new(c + Vector3.new(0, 2.9, 0)), Color = Color3.fromRGB(120, 60, 40), Material = Enum.Material.WoodPlanks })
-	P(shrine, { Name = "ChestLid", Shape = Enum.PartType.Cylinder, Size = Vector3.new(7, 4.5, 4.5), CFrame = CFrame.new(c + Vector3.new(0, 4.5, 0)), Color = Color3.fromRGB(135, 70, 45), Material = Enum.Material.WoodPlanks })
-	for _, x in ipairs({ -3.2, 0, 3.2 }) do
-		P(shrine, { Name = "Band", Size = Vector3.new(0.4, 3.3, 4.6), CFrame = CFrame.new(c + Vector3.new(x, 2.9, 0)), Color = gold, Material = Enum.Material.Metal })
-	end
-	local lock = P(shrine, { Name = "Lock", Size = Vector3.new(1, 1.2, 0.4), CFrame = CFrame.new(c + Vector3.new(0, 3.6, -2.35)), Color = gold, Material = Enum.Material.Neon })
-	local crack = P(shrine, { Name = "Crack", Size = Vector3.new(6.6, 0.15, 4.4), CFrame = CFrame.new(c + Vector3.new(0, 4.5, 0)), Color = gold, Material = Enum.Material.Neon })
-	light(crack, gold, 22, 2.5, true)
-	emitter(crack, "Stars", gold, 6, Vector3.new(0, 1, 0))
-	for i, r in ipairs(Config.WeaponRarities) do
-		local a = (i / #Config.WeaponRarities) * math.pi * 2
-		local gem = P(shrine, { Name = "Gem_" .. r.Id, Size = Vector3.new(0.9, 1.6, 0.9), CFrame = CFrame.new(c + Vector3.new(math.cos(a) * 6, 8, math.sin(a) * 6)) * CFrame.Angles(0, a, math.rad(45)), Color = r.Color, Material = Enum.Material.Neon, CanCollide = false })
-		spin(gem, 70, 0.5)
-	end
-	billboard(lock, "WEAPON CHESTS", "Keys, scrolls and gacha spins", gold, 7, 1)
-	map.ChestPrompt = prompt(base, "Open Chests", "Weapon Shrine", "ChestPrompt", "Chests")
-	poi(base, "Weapon Shrine", "Service", "Weapon chests, keys and gacha spins.", "Hub", { Frame = 22, Travel = "Hub" })
-	shrine.Parent = root:FindFirstChild("Hub") or root
-end
-
----------------------------------------------------------------------
--- AMBIENT PARTICLES (energy motes, cherry blossoms, dark aura trails)
----------------------------------------------------------------------
-buildAmbient = function(map)
+local function buildAmbient(map)
 	local amb = folder("Ambient", root)
-
-	-- ground fog rolling around the plaza edge, the train grounds and the tower
-	for _, spec in ipairs({
-		{ CFrame.new(0, 1.5, -75), Vector3.new(150, 2, 40) },
-		{ CFrame.new(0, 1.5, 80), Vector3.new(150, 2, 40) },
-		{ CFrame.new(-75, 1.5, 0), Vector3.new(40, 2, 110) },
-		{ CFrame.new(75, 1.5, 0), Vector3.new(40, 2, 110) },
-	}) do
-		ambientVolume(amb, spec[1], spec[2], "Fog", Color3.fromRGB(236, 226, 246), 2.5)
-	end
-	ambientVolume(amb, CFrame.new(-175, 2, 0), Vector3.new(160, 2, 60), "Fog", Color3.fromRGB(226, 246, 232), 3)
-	ambientVolume(amb, CFrame.new(160, 2, 0), Vector3.new(60, 2, 60), "Fog", Color3.fromRGB(215, 190, 245), 2)
-	-- dust motes catching the light, and lazy embers drifting off the forge
-	ambientVolume(amb, CFrame.new(0, 8, 0), Vector3.new(170, 16, 170), "Dust", Color3.fromRGB(255, 240, 220), 10)
-	ambientVolume(amb, CFrame.new(0, 5, -30), Vector3.new(36, 6, 36), "FloatEmbers", Color3.fromRGB(255, 150, 60), 5)
-	ambientVolume(amb, CFrame.new(160, 6, 0), Vector3.new(50, 8, 50), "FloatEmbers", Color3.fromRGB(200, 120, 255), 4)
-	local motes = ambientVolume(amb, CFrame.new(0, 10, -10), Vector3.new(180, 16, 180), "Rise", Color3.fromRGB(180, 220, 255), 14)
-	motes.Speed = NumberRange.new(0.5, 1.5)
-	motes.Lifetime = NumberRange.new(3, 5)
-	motes.Size = VFX.NS(0, 0, 0.2, 0.25, 0.8, 0.25, 1, 0)
-	local petals = ambientVolume(amb, CFrame.new(0, 45, 0), Vector3.new(220, 4, 220), "Petals", Color3.fromRGB(255, 170, 210), 20)
+	ambientVolume(amb, CFrame.new(0, 3, 0), Vector3.new(150, 2, 150), "Fog", Color3.fromRGB(190, 180, 215), 5)
+	ambientVolume(amb, CFrame.new(0, 10, 0), Vector3.new(150, 16, 150), "Dust", Color3.fromRGB(255, 235, 210), 10)
+	ambientVolume(amb, CFrame.new(0, 6, -34), Vector3.new(34, 6, 34), "FloatEmbers", Color3.fromRGB(255, 150, 60), 5)
+	local petals = ambientVolume(amb, CFrame.new(0, 45, 0), Vector3.new(200, 4, 200), "Petals", Color3.fromRGB(255, 160, 205), 10)
 	petals.Lifetime = NumberRange.new(8, 12)
 	petals.Acceleration = Vector3.new(1.5, -3, 0.8)
-	petals.Size = VFX.NS(0, 0.35, 1, 0.25)
-	for zoneId, dungeon in pairs(map.Dungeons) do
-		local o = dungeon.Origin
-		local len = 60 + 100 * Config.StagesPerZone
-		local cf = CFrame.new(o.X, 3, o.Z + 30 - len / 2)
-		local fogColor = zoneId == 2 and Color3.fromRGB(140, 175, 215) or Color3.fromRGB(215, 240, 215)
-		ambientVolume(amb, cf + Vector3.new(0, -1, 0), Vector3.new(76, 2, len), "Fog", fogColor, 9)
-		ambientVolume(amb, cf + Vector3.new(0, 7, 0), Vector3.new(76, 12, len), "Dust", fogColor, 12)
-		if zoneId == 2 then
-			ambientVolume(amb, cf + Vector3.new(0, 3, 0), Vector3.new(76, 6, len), "FloatEmbers", Color3.fromRGB(0, 230, 255), 8)
-			local dark = ambientVolume(amb, cf, Vector3.new(76, 2, len), "Aura", Color3.fromRGB(110, 40, 180), 30)
-			dark.Transparency = VFX.NS(0, 0.7, 0.5, 0.8, 1, 1)
-			dark.Speed = NumberRange.new(1, 3)
-			dark.Lifetime = NumberRange.new(1.5, 2.5)
-			dark.LockedToPart = false
-		else
-			local flies = ambientVolume(amb, cf + Vector3.new(0, 5, 0), Vector3.new(76, 10, len), "Stars", Color3.fromRGB(170, 255, 140), 18)
-			flies.Speed = NumberRange.new(0.2, 1)
-			flies.Lifetime = NumberRange.new(2, 4)
-			flies.Size = VFX.NS(0, 0, 0.5, 0.35, 1, 0)
-		end
+	ambientVolume(amb, CFrame.new(W.TrainCenter + Vector3.new(0, 3, 0)), Vector3.new(110, 2, 110), "Fog", Color3.fromRGB(180, 220, 190), 3)
+	ambientVolume(amb, CFrame.new(W.BossRushCenter + Vector3.new(0, 6, 0)), Vector3.new(90, 8, 90), "FloatEmbers", Color3.fromRGB(200, 120, 255), 5)
+	for _, zone in ipairs(Config.Zones) do
+		local first = (zone.Id - 1) * Config.StagesPerZone + 1
+		local last = first + Config.StagesPerZone - 1
+		local zStart = Config.StageBounds(first)
+		local _, zEnd = Config.StageBounds(last)
+		local len = zStart - zEnd
+		local cf = CFrame.new(0, 3, (zStart + zEnd) / 2)
+		ambientVolume(amb, cf, Vector3.new(W.PathWidth - 4, 2, len), "Fog", zone.Tint:Lerp(zone.Accent, 0.2), 12)
+		ambientVolume(amb, cf + Vector3.new(0, 7, 0), Vector3.new(W.PathWidth - 4, 12, len), "Dust", zone.Accent:Lerp(Color3.new(1, 1, 1), 0.5), 12)
+		local special = ({ "Petals", "FloatEmbers", "Petals", "Stars", "Frost", "Void" })[zone.Id]
+		local e = ambientVolume(amb, cf + Vector3.new(0, 10, 0), Vector3.new(W.PathWidth - 4, 16, len), special, zone.Accent, 10)
+		e.Lifetime = NumberRange.new(3, 6)
+		e.Speed = NumberRange.new(0.5, 2)
 	end
+	local _ = map
 end
 
 ---------------------------------------------------------------------
@@ -995,17 +854,11 @@ function MapBuilder.Build()
 	root.Parent = workspace
 
 	buildLighting()
-	local map = { Root = root, Dungeons = {} }
-	buildHub(map)
+	local map = { Root = root }
+	buildPlaza(map)
 	buildTrain(map)
-	buildPortals(map)
-	buildTower(map)
-	buildChestShrine(map)
-	for _, zone in ipairs(Config.Zones) do
-		if not zone.ComingSoon then
-			buildDungeon(map, zone)
-		end
-	end
+	buildBossRush(map)
+	buildPath(map)
 	buildAmbient(map)
 	applyMaterialVariants(root)
 

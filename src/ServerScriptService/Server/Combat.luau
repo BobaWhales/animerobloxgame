@@ -7,14 +7,15 @@
 --   R    class ultimate
 --   C    Overdrive (handled in Actions)
 -- Stamina, cooldowns (with the global nerf multipliers), stun caps and
--- damage caps are all enforced here.
+-- damage caps are all enforced here, and so are the ore effects forged into
+-- the equipped weapon (burn, frost, shock, poison, bleed, lifesteal, echo,
+-- radiant splash, void execute, titan, gale...).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 local Shared = ReplicatedStorage:WaitForChild("GameShared")
 local Config = require(Shared:WaitForChild("Config"))
-local Format = require(Shared:WaitForChild("Format"))
 
 local DataService = require(script.Parent:WaitForChild("DataService"))
 local Stats = require(script.Parent:WaitForChild("Stats"))
@@ -80,10 +81,10 @@ function Combat.PadAt(player: Player)
 end
 
 local function padReqText(pad): string
-	if pad.Rebirths > 0 then
-		return pad.Rebirths .. " Rebirth" .. (pad.Rebirths > 1 and "s" or "")
+	if (pad.Ascensions or 0) > 0 then
+		return pad.Ascensions .. " Ascension" .. (pad.Ascensions > 1 and "s" or "")
 	end
-	return Format.Abbrev(pad.Power) .. " Power"
+	return pad.Rebirths .. " Rebirth" .. (pad.Rebirths > 1 and "s" or "")
 end
 
 local function spendStamina(player: Player, s, cost: number): boolean
@@ -97,13 +98,29 @@ local function spendStamina(player: Player, s, cost: number): boolean
 	return true
 end
 
--- One damage instance with crits, race passives and weapon passives.
+local function proc(e, effectId: string)
+	Net.FXAll("Proc", { Pos = e.Root.Position + Vector3.new(0, e.Scale, 0), Effect = effectId })
+end
+
+local function heal(player: Player, fraction: number)
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum and hum.Health > 0 and fraction > 0 then
+		hum.Health = math.min(hum.MaxHealth, hum.Health + hum.MaxHealth * fraction)
+	end
+end
+
+-- One damage instance with crits, race passives, weapon passives and the
+-- weapon's ore effects. opts.NoProc stops effects re-triggering on splashes.
 local function hit(player: Player, e, coef: number, opts): boolean
 	if e.Dead or not EnemyService.CanDamage(player, e) then
 		return false
 	end
 	local data = DataService.Get(player)
 	local race = Stats.Race(data)
+	local E = function(id)
+		return Stats.Effect(player, id)
+	end
 	local dmg = Stats.Damage(player) * coef * (0.92 + math.random() * 0.16)
 	local crit = math.random() < Stats.CritChance(player)
 	if crit then
@@ -113,7 +130,14 @@ local function hit(player: Player, e, coef: number, opts): boolean
 		dmg *= race.FirstHit
 		crit = true
 	end
+	if e.Boss then
+		dmg *= 1 + E("Titan")
+		if Stats.HasPassive(player, "OniWrath") then
+			dmg *= 1.3
+		end
+	end
 	EnemyService.Damage(e, player, dmg, crit)
+
 	if opts then
 		if opts.Knockback and opts.From then
 			EnemyService.Knockback(e, flat(e.Root.Position - opts.From), opts.Knockback)
@@ -134,6 +158,65 @@ local function hit(player: Player, e, coef: number, opts): boolean
 	if (opts and opts.Burn or Stats.HasPassive(player, "Hellfire")) and math.random() < 0.2 then
 		EnemyService.DoT(e, player, Stats.Damage(player) * 0.3, 3, 0.4, Color3.fromRGB(190, 80, 255))
 	end
+	if opts and opts.NoProc then
+		return true
+	end
+
+	-- ore effects ------------------------------------------------------
+	local base = Stats.Damage(player)
+	if math.random() < E("Burn") then
+		EnemyService.DoT(e, player, base * 0.3, 3, 0.4, Color3.fromRGB(255, 120, 40))
+	end
+	if math.random() < E("Frost") then
+		EnemyService.Slow(e, 1.5)
+		proc(e, "Frost")
+	end
+	if math.random() < E("Poison") then
+		EnemyService.DoT(e, player, base * 0.15, 4, 0.5, Color3.fromRGB(120, 230, 90))
+	end
+	local bleed = E("Bleed")
+	if crit and bleed > 0 then
+		EnemyService.DoT(e, player, dmg * bleed / 3, 3, 0.35, Color3.fromRGB(220, 30, 50))
+	end
+	if math.random() < E("Shock") then
+		local best, bestD = nil, 16
+		for _, other in ipairs(EnemyService.InSphere(e.Root.Position, 16)) do
+			local d = (other.Root.Position - e.Root.Position).Magnitude
+			if other ~= e and d < bestD and EnemyService.CanDamage(player, other) then
+				best, bestD = other, d
+			end
+		end
+		if best then
+			Net.FXAll("Chain", { From = e.Root.Position, To = best.Root.Position, Color = Config.Effects.Shock.Color })
+			hit(player, best, coef * 0.5, { NoProc = true })
+		end
+	end
+	local radiant = E("Radiant")
+	if radiant > 0 then
+		for _, other in ipairs(EnemyService.InSphere(e.Root.Position, 8)) do
+			if other ~= e then
+				hit(player, other, coef * radiant, { NoProc = true })
+			end
+		end
+		proc(e, "Radiant")
+	end
+	if math.random() < E("Echo") and not e.Dead then
+		task.delay(0.12, function()
+			if not e.Dead then
+				hit(player, e, coef, { NoProc = true })
+				proc(e, "Echo")
+			end
+		end)
+	end
+	if Stats.HasPassive(player, "Binding") and math.random() < 0.15 then
+		EnemyService.Stun(e, 0.4)
+	end
+	heal(player, E("Lifesteal") + Stats.ArmorBonus(player, "Lifesteal"))
+	local void = E("Void")
+	if void > 0 and not e.Dead and not e.Boss and e.HP / e.MaxHP < void then
+		proc(e, "Void")
+		EnemyService.Damage(e, player, e.HP + 1, true)
+	end
 	return true
 end
 
@@ -141,8 +224,7 @@ local function notifyBlocked(player: Player, s, e)
 	local t = os.clock()
 	if e.StageIndex and t - (s.LastBlockedNotify or 0) > 3 then
 		s.LastBlockedNotify = t
-		local stage = Config.Stages[e.StageIndex]
-		Net.Notify(player, "Too weak! Stage " .. e.StageIndex .. " needs " .. Format.Abbrev(stage.PowerReq) .. " Power.", Color3.fromRGB(255, 120, 90), "Error")
+		Net.Notify(player, "Stage " .. e.StageIndex .. " is locked. Clear stage " .. (e.StageIndex - 1) .. " first!", Color3.fromRGB(255, 120, 90), "Error")
 	end
 end
 
@@ -195,29 +277,41 @@ local function basicAttack(player: Player, payload)
 
 	train(player, data)
 
+	local pierceBonus = Stats.Effect(player, "Pierce")
 	if class.Kind == "Ranged" then
 		local origin = root.Position + Vector3.new(0, 1.2, 0) + aim * 2
-		local pierce = Stats.HasPassive(player, "LoneWolf") and 1 or nil
-		Projectiles.Fire({
-			Owner = player,
-			Origin = origin,
-			Dir = aim,
-			Speed = class.Speed,
-			Range = class.Range,
-			Radius = class.Radius,
-			Pierce = pierce,
-			Kind = class.Projectile,
-			Color = def.Glow or rarity.Color,
-			Size = 1.2,
-			OnHit = function(e)
-				if not hit(player, e, coef) then
-					notifyBlocked(player, s, e)
-				end
-			end,
-		})
+		local pierce = (Stats.HasPassive(player, "LoneWolf") and 1 or 0) + math.floor(pierceBonus * 10)
+		local explode = class.Explode and class.Explode * (Stats.HasPassive(player, "Psycho") and 1.5 or 1) or nil
+		local shots = class.Multi or 1
+		for k = 1, shots do
+			local yaw = shots > 1 and math.rad((k - (shots + 1) / 2) * 10) or 0
+			local dir = (CFrame.lookAt(Vector3.zero, aim) * CFrame.Angles(0, yaw, 0)).LookVector
+			Projectiles.Fire({
+				Owner = player,
+				Origin = origin,
+				Dir = dir,
+				Speed = class.Speed,
+				Range = class.Range,
+				Radius = class.Radius,
+				Pierce = pierce > 0 and pierce or nil,
+				Kind = class.Projectile,
+				Color = def.Glow or rarity.Color,
+				Size = 1.2,
+				Explode = explode,
+				OnHit = function(e)
+					if not hit(player, e, coef) then
+						notifyBlocked(player, s, e)
+					end
+				end,
+				OnExplode = explode and function(pos, radius)
+					hitList(player, s, EnemyService.InSphere(pos, radius), coef * 0.5, { NoProc = true })
+				end or nil,
+			})
+		end
 	else
 		local dir = flat(aim)
-		hitList(player, s, EnemyService.InCone(root.Position, dir, class.Range, class.Arc), coef, nil)
+		local kb = (class.Knockback or 0) + Stats.Effect(player, "Gale")
+		hitList(player, s, EnemyService.InCone(root.Position, dir, class.Range * (1 + pierceBonus), class.Arc), coef, kb > 0 and { Knockback = kb, From = root.Position } or nil)
 	end
 
 	-- Sorcerer race: every Nth swing is an elemental AoE
@@ -247,9 +341,10 @@ local function dash(player: Player, payload)
 	if not spendStamina(player, s, Stats.StaminaCost(player, B.DashStamina)) then
 		return
 	end
-	s.Cooldowns.Q = t + B.DashCooldown * B.CooldownMult
+	local dashCd = B.DashCooldown * B.CooldownMult * (Stats.HasPassive(player, "Raijin") and 0.6 or 1)
+	s.Cooldowns.Q = t + dashCd
 	s.InvulnUntil = math.max(s.InvulnUntil, Stats.Now() + B.DashIFrames)
-	Net.FX(player, "Cooldown", { Slot = "Q", Duration = B.DashCooldown * B.CooldownMult })
+	Net.FX(player, "Cooldown", { Slot = "Q", Duration = dashCd })
 	Net.FXAll("Dash", { Player = player, Dir = readAim(payload, root) })
 end
 
@@ -270,7 +365,7 @@ executors.Cone = function(player, s, skill, root, aim)
 			if not r then
 				return
 			end
-			hitList(player, s, EnemyService.InCone(r.Position, dir, skill.Range, skill.Arc or 0), skill.Damage, { Knockback = skill.Knockback, From = r.Position, Stun = skill.Stun })
+			hitList(player, s, EnemyService.InCone(r.Position, dir, skill.Range, skill.Arc or 0), skill.Damage, { Knockback = skill.Knockback, From = r.Position, Stun = skill.Stun, Pull = skill.PullIn and r.Position or nil })
 		end
 	end)
 end
@@ -308,7 +403,7 @@ local function fireSkillProjectile(player, s, skill, origin: Vector3, dir: Vecto
 		Kind = skill.Projectile,
 		Color = skill.Color,
 		Size = size or skill.Size,
-		Explode = skill.Explode,
+		Explode = skill.Explode and skill.Explode * (Stats.HasPassive(player, "Psycho") and 1.5 or 1) or nil,
 		OnHit = function(e)
 			if not hit(player, e, coef, { Knockback = skill.Knockback, From = origin }) then
 				notifyBlocked(player, s, e)
@@ -358,7 +453,7 @@ executors.DashStrike = function(player, s, skill, root, aim)
 	local finish = start + dir * dist
 	s.InvulnUntil = math.max(s.InvulnUntil, Stats.Now() + 0.15)
 	task.delay(0.08, function()
-		hitList(player, s, EnemyService.InSegment(start, finish, skill.Width / 2), skill.Damage, { Knockback = skill.Knockback, From = start, Burn = skill.Burn })
+		hitList(player, s, EnemyService.InSegment(start, finish, skill.Width / 2), skill.Damage, { Knockback = skill.Knockback, From = start, Burn = skill.Burn or Stats.HasPassive(player, "DragonBlood") })
 	end)
 	return { Finish = finish }
 end
@@ -549,12 +644,28 @@ function Combat.Init(m)
 	end)
 
 	EnemyService.OnKill = function(player: Player)
+		local s = DataService.Session(player)
+		local data = DataService.Get(player)
+		local stamina = 0
 		if Stats.HasPassive(player, "RiftHunger") then
-			local s = DataService.Session(player)
-			if s then
-				s.Stamina = math.min(B.MaxStamina, s.Stamina + 12)
-				player:SetAttribute("Stamina", math.floor(s.Stamina))
-			end
+			stamina += 12
+		end
+		if Stats.HasPassive(player, "Chakra9") then
+			stamina += 10
+			heal(player, 0.05)
+		end
+		if s and stamina > 0 then
+			s.Stamina = math.min(B.MaxStamina, s.Stamina + stamina)
+			player:SetAttribute("Stamina", math.floor(s.Stamina))
+		end
+		-- ore effects on kill
+		heal(player, Stats.Effect(player, "Holy"))
+		local soul = Stats.Effect(player, "Soul")
+		if soul > 0 and data then
+			local gain = Config.ClickPower * Stats.PowerMult(player) * soul
+			data.Power += gain
+			Net.FX(player, "Power", { Amount = gain })
+			DataService.MarkDirty(player)
 		end
 	end
 

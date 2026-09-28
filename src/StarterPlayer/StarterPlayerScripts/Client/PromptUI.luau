@@ -14,6 +14,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("GameShared")
+local Config = require(Shared:WaitForChild("Config"))
 local UITheme = require(Shared:WaitForChild("UITheme"))
 local SFX = require(Shared:WaitForChild("SFX"))
 
@@ -143,7 +144,7 @@ local function build(prompt: ProximityPrompt)
 	key.Position = UDim2.new(0, 2, 0.5, 0)
 	key.BackgroundColor3 = Color3.fromRGB(245, 242, 255)
 	key.BackgroundTransparency = 0.1
-	key.Font = Enum.Font.BuilderSansExtraBold
+	key.Font = Config.Fonts.Display
 	key.TextScaled = true
 	key.TextColor3 = Color3.fromRGB(24, 18, 40)
 	key.Text = ""
@@ -172,8 +173,8 @@ local function build(prompt: ProximityPrompt)
 	fill.BorderSizePixel = 0
 	fill.Parent = group
 
-	softText(group, prompt.ActionText, Enum.Font.BuilderSansBold, Color3.new(1, 1, 1), UDim2.fromOffset(38, 3), UDim2.new(1, -40, 0, 20), 0)
-	softText(group, prompt.ObjectText, Enum.Font.BuilderSansMedium, Color3.fromRGB(215, 208, 240), UDim2.fromOffset(38, 23), UDim2.new(1, -40, 0, 13), 0.2)
+	softText(group, prompt.ActionText, Config.Fonts.Heading, Color3.new(1, 1, 1), UDim2.fromOffset(38, 3), UDim2.new(1, -40, 0, 20), 0)
+	softText(group, prompt.ObjectText, Config.Fonts.Body, Color3.fromRGB(215, 208, 240), UDim2.fromOffset(38, 23), UDim2.new(1, -40, 0, 13), 0.2)
 
 	-- touch: tap the key cap to trigger
 	key.InputBegan:Connect(function(input)

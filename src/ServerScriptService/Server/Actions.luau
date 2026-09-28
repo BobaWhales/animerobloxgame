@@ -18,6 +18,7 @@ local Monetization = require(script.Parent:WaitForChild("Monetization"))
 local TowerService = require(script.Parent:WaitForChild("TowerService"))
 local Util = require(script.Parent:WaitForChild("Util"))
 local Weapons = require(script.Parent:WaitForChild("Weapons"))
+local Forge = require(script.Parent:WaitForChild("Forge"))
 
 local Actions = {}
 local map = nil
@@ -37,7 +38,8 @@ function Actions.ApplyCharacter(player: Player)
 	if not data or not hum then
 		return
 	end
-	hum.WalkSpeed = Stats.WalkSpeed(player)
+	local s = DataService.Session(player)
+	hum.WalkSpeed = Stats.WalkSpeed(player) * (s and s.AdminSpeed and 3 or 1)
 end
 
 ---------------------------------------------------------------------
@@ -47,22 +49,18 @@ handlers.Collect = function(player, id)
 	Loot.Collect(player, id)
 end
 
-handlers.Forge = function(player, oreId)
-	if not near(player, map.Forge, 32) then
-		Net.Notify(player, "Bring your ore to the Forge cauldron in the Hub!", RED, "Error")
+-- payload = { Ores = {...}, Catalyst = key? }  (see Forge.luau)
+handlers.Forge = function(player, payload)
+	if not near(player, map.Forge, 40) then
+		Net.Notify(player, "Stand next to the Soul Forge at spawn to forge weapons.", RED, "Error")
 		return
 	end
-	if type(oreId) ~= "string" then
-		oreId = nil
-	end
-	if Loot.Forge(player, oreId) <= 0 then
-		Net.Notify(player, "No ore to forge. Go slay monsters in the Dungeon!", RED, "Error")
-	end
+	Forge.Craft(player, payload)
 end
 
 handlers.Sell = function(player, oreId)
 	if not near(player, map.Sell, 30) then
-		Net.Notify(player, "Visit the Sell stall in the Hub to sell ore.", RED, "Error")
+		Net.Notify(player, "Visit the Sell stall at spawn to sell ore.", RED, "Error")
 		return
 	end
 	if type(oreId) ~= "string" then
@@ -81,7 +79,6 @@ handlers.Upgrade = function(player, key)
 	local level = data.Upgrades[key]
 	local cost = Stats.UpgradeCost(key, level)
 	if not cost then
-		Net.Notify(player, Config.Upgrades[key].Name .. " is maxed!", RED, "Error")
 		return
 	end
 	if data.Coins < cost then
@@ -105,10 +102,33 @@ handlers.Rebirth = function(player)
 	data.Rebirths += 1
 	data.Power = keep
 	data.Coins = 0
-	data.Rerolls += Config.RebirthRerollReward
+	data.Rerolls += Config.Rebirth.RerollReward
 	TowerService.Leave(player)
-	Util.Teleport(player, map.HubCFrame, "Hub")
+	Util.Teleport(player, map.HubCFrame, "Spawn")
 	Net.FXAll("Rebirth", { Player = player, Rebirths = data.Rebirths })
+	Cosmetics.Apply(player)
+	DataService.MarkDirty(player)
+end
+
+-- Ascension: needs Config.AscendReq rebirths. Resets rebirths, Power and
+-- Coins for a huge permanent multiplier (x8 Power, x4 Coins each).
+handlers.Ascend = function(player)
+	local data = DataService.Get(player)
+	local req = Config.AscendReq(data.Ascensions)
+	if data.Rebirths < req then
+		Net.Notify(player, "Ascending needs " .. req .. " Rebirths.", RED, "Error")
+		return
+	end
+	data.Ascensions += 1
+	data.Rebirths = 0
+	data.Power = 0
+	data.Coins = 0
+	data.Rerolls += Config.Ascension.Rerolls
+	local cat = Config.Ascension.Catalyst
+	data.Keys[cat] = (data.Keys[cat] or 0) + 1
+	TowerService.Leave(player)
+	Util.Teleport(player, map.HubCFrame, "Spawn")
+	Net.FXAll("Ascend", { Player = player, Ascensions = data.Ascensions })
 	Cosmetics.Apply(player)
 	DataService.MarkDirty(player)
 end
@@ -193,33 +213,40 @@ handlers.Teleport = function(player, dest)
 		return
 	end
 	if TowerService.InTower(player) then
-		Net.Notify(player, "Leave the Tower first.", RED, "Error")
+		-- the HOME button also works as "leave Boss Rush"
+		if dest == "Hub" then
+			TowerService.Leave(player)
+		else
+			Net.Notify(player, "Leave the Boss Rush first.", RED, "Error")
+		end
 		return
 	end
+	-- spawn, the training grounds and the boss rush island are free
 	if dest == "Hub" then
-		Util.Teleport(player, map.HubCFrame, "Hub")
+		Util.Teleport(player, map.HubCFrame, "Spawn")
 		return
-	end
-	if not Stats.HasPass(player, "FastTravel") then
-		Net.Notify(player, "Fast Travel gamepass needed. Use the portals in the Hub for free!", RED, "Error")
+	elseif dest == "Train" then
+		Util.Teleport(player, map.TrainCFrame, "Training Grounds")
 		return
-	end
-	if dest == "Train" then
-		Util.Teleport(player, map.TrainCFrame, "Train Area")
 	elseif dest == "Tower" then
-		Util.Teleport(player, map.TowerCFrame, "Tower")
-	elseif dest:sub(1, 6) == "Stage_" then
+		Util.Teleport(player, map.TowerCFrame, "Boss Rush")
+		return
+	end
+	if dest:sub(1, 6) == "Stage_" then
 		local idx = tonumber(dest:sub(7))
 		local stage = idx and Config.Stages[idx]
 		if not stage then
 			return
 		end
 		if not Stats.StageUnlocked(data, idx) then
-			Net.Notify(player, "Stage " .. idx .. " is locked.", RED, "Error")
+			Net.Notify(player, "Stage " .. idx .. " is locked. Clear stage " .. (idx - 1) .. " first.", RED, "Error")
 			return
 		end
-		local dungeon = map.Dungeons[stage.Zone]
-		local info = dungeon and dungeon.Stages[idx]
+		if not Stats.HasPass(player, "FastTravel") then
+			Net.Notify(player, "Fast Travel gamepass needed to jump to stages. Walk the Path for free!", RED, "Error")
+			return
+		end
+		local info = map.Path and map.Path.Stages[idx]
 		if info then
 			Util.Teleport(player, info.Entry, "Stage " .. idx)
 		end
@@ -297,34 +324,13 @@ handlers.Scrap = function(player, uid)
 	Weapons.Scrap(player, uid)
 end
 
-function Actions.ChestCost(data, chest): number
-	return math.floor((chest.CoinCost or 0) * (1 + data.Rebirths))
+handlers.EquipArmor = function(player, uid)
+	Weapons.EquipArmor(player, uid)
+	Actions.ApplyCharacter(player)
 end
 
-handlers.OpenChest = function(player, chestId)
-	local data = DataService.Get(player)
-	local chest = type(chestId) == "string" and Config.ChestById[chestId]
-	if not chest then
-		return
-	end
-	if chest.Key then
-		if (data.Keys[chest.Key] or 0) <= 0 then
-			Net.Notify(player, "You need a " .. Config.KeyNames[chest.Key] .. ". Earn them from play-time rewards!", RED, "Error")
-			return
-		end
-		data.Keys[chest.Key] -= 1
-	else
-		local cost = Actions.ChestCost(data, chest)
-		if data.Coins < cost then
-			Net.Notify(player, "Not enough Coins (" .. Format.Abbrev(cost) .. " needed).", RED, "Error")
-			return
-		end
-		data.Coins -= cost
-	end
-	local weaponId, rarityId = Weapons.Roll(chest.MinRarity, 1)
-	local uid = Weapons.Add(player, weaponId, rarityId)
-	Net.FX(player, "ChestResult", { Chest = chest.Id, Weapon = weaponId, Rarity = rarityId, Uid = uid })
-	DataService.MarkDirty(player)
+handlers.ScrapArmor = function(player, uid)
+	Weapons.ScrapArmor(player, uid)
 end
 
 handlers.BuyPower = function(player)
@@ -334,7 +340,7 @@ end
 ---------------------------------------------------------------------
 -- CUSTOM PROXIMITY PROMPTS (client fires Interact after Triggered)
 ---------------------------------------------------------------------
-local PANEL_FOR = { Upgrades = "Upgrades", Race = "Race", Rebirth = "Rebirth", Index = "Index", Chests = "Chests" }
+local PANEL_FOR = { Upgrades = "Upgrades", Race = "Race", Rebirth = "Rebirth", Index = "Index", Forge = "Forge" }
 
 handlers.Interact = function(player, prompt)
 	if typeof(prompt) ~= "Instance" or not prompt:IsA("ProximityPrompt") or not prompt.Enabled then
@@ -351,9 +357,7 @@ handlers.Interact = function(player, prompt)
 		return
 	end
 	local action = prompt:GetAttribute("Action")
-	if action == "Forge" then
-		handlers.Forge(player, nil)
-	elseif action == "Sell" then
+	if action == "Sell" then
 		Net.FX(player, "OpenPanel", { Name = "Backpack", Mode = "Sell" })
 	elseif action == "Tower" then
 		TowerService.Start(player)

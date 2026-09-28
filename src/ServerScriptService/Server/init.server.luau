@@ -3,13 +3,12 @@
 -- Entry point. All the ModuleScripts listed in SETUP.md go INSIDE this Script.
 
 local Players = game:GetService("Players")
-local DataStoreService = game:GetService("DataStoreService")
-local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("GameShared")
 local Config = require(Shared:WaitForChild("Config"))
 local Format = require(Shared:WaitForChild("Format"))
+local VFX = require(Shared:WaitForChild("VFX"))
 
 local Net = require(script:WaitForChild("Net"))
 local DataService = require(script:WaitForChild("DataService"))
@@ -24,70 +23,20 @@ local TowerService = require(script:WaitForChild("TowerService"))
 local Combat = require(script:WaitForChild("Combat"))
 local Monetization = require(script:WaitForChild("Monetization"))
 local Actions = require(script:WaitForChild("Actions"))
-local Util = require(script:WaitForChild("Util"))
+local Admin = require(script:WaitForChild("Admin"))
+local Leaderboards = require(script:WaitForChild("Leaderboards"))
 
 ---------------------------------------------------------------------
 -- WORLD
 ---------------------------------------------------------------------
+VFX.BuildLibrary() -- ReplicatedStorage.VFX: the editable effect hierarchy
 local map = MapBuilder.Build()
 task.spawn(EnemyService.Init, map) -- builds enemy rigs (yields), players can join meanwhile
 TowerService.Init(map)
 Combat.Init(map)
 Actions.Init(map)
-
-
----------------------------------------------------------------------
--- PORTALS
----------------------------------------------------------------------
--- Prompts use Style = Custom. The client draws them (Client/PromptUI) and
--- fires Remotes.Interact on Triggered; Actions validates and runs them.
-
-local function playerFromHit(hit: BasePart): Player?
-	local model = hit:FindFirstAncestorOfClass("Model")
-	return model and Players:GetPlayerFromCharacter(model)
-end
-
-local function portalDebounce(player: Player): boolean
-	local s = DataService.Session(player)
-	if not s or os.clock() - s.LastPortal < 2 then
-		return false
-	end
-	s.LastPortal = os.clock()
-	return true
-end
-
-for zoneId, portal in pairs(map.Portals) do
-	local zone = Config.Zones[zoneId]
-	if not zone.ComingSoon then
-		portal.Touched:Connect(function(hit)
-			local player = playerFromHit(hit)
-			if not player or not portalDebounce(player) then
-				return
-			end
-			local data = DataService.Get(player)
-			if not data then
-				return
-			end
-			if data.Blade < (zone.BladeReq or 0) then
-				Net.Notify(player, zone.Name .. " needs Blade +" .. zone.BladeReq .. ". Forge more ore!", Color3.fromRGB(255, 110, 90), "Error")
-				return
-			end
-			local dungeon = map.Dungeons[zoneId]
-			if dungeon then
-				Util.Teleport(player, dungeon.StartCFrame, zone.Name)
-			end
-		end)
-	end
-end
-
-for _, ret in ipairs(CollectionService:GetTagged("ReturnPortal")) do
-	ret.Touched:Connect(function(hit)
-		local player = playerFromHit(hit)
-		if player and portalDebounce(player) then
-			Util.Teleport(player, map.HubCFrame, "Hub")
-		end
-	end)
-end
+Admin.Init(map)
+Leaderboards.Init(map)
 
 ---------------------------------------------------------------------
 -- SYNC + LEADERSTATS
@@ -105,8 +54,8 @@ DataService.OnFlush = function(player: Player)
 	if snap then
 		Net.Sync:FireClient(player, snap)
 		setStat(player, "Power", Format.Abbrev(snap.Power))
-		setStat(player, "Forge", "+" .. Format.Abbrev(snap.Blade))
-		setStat(player, "Rebirths", Format.Abbrev(snap.Rebirths))
+		setStat(player, "Stage", tostring(snap.Stage))
+		setStat(player, "Rebirths", (snap.Ascensions > 0 and ("A" .. snap.Ascensions .. " ") or "") .. Format.Abbrev(snap.Rebirths))
 	end
 end
 
@@ -116,6 +65,14 @@ Monetization.OnPassesChanged = function(player: Player)
 end
 
 Playtime.OnCosmeticsChanged = function(player: Player)
+	Cosmetics.Apply(player)
+end
+
+Admin.OnApplyCharacter = function(player: Player)
+	Actions.ApplyCharacter(player)
+end
+
+Admin.OnCosmetics = function(player: Player)
 	Cosmetics.Apply(player)
 end
 
@@ -142,6 +99,7 @@ local function onCharacter(player: Player, char: Model)
 	task.wait(0.1)
 	Weapons.EnsureStarter(player)
 	Weapons.Refresh(player)
+	Weapons.RefreshArmor(player)
 	Cosmetics.Apply(player)
 	Actions.ApplyCharacter(player)
 end
@@ -149,7 +107,7 @@ end
 local function onPlayerAdded(player: Player)
 	local ls = Instance.new("Folder")
 	ls.Name = "leaderstats"
-	for _, name in ipairs({ "Power", "Forge", "Rebirths" }) do
+	for _, name in ipairs({ "Power", "Stage", "Rebirths" }) do
 		local v = Instance.new("StringValue")
 		v.Name = name
 		v.Value = "0"
@@ -162,6 +120,7 @@ local function onPlayerAdded(player: Player)
 	end)
 
 	DataService.Load(player)
+	Admin.PlayerAdded(player)
 	Monetization.LoadPasses(player)
 	Weapons.EnsureStarter(player)
 	Playtime.OnJoin(player)
@@ -203,51 +162,6 @@ task.spawn(function()
 				Loot.CleanupDrops(player)
 			end
 		end
-	end
-end)
-
----------------------------------------------------------------------
--- GLOBAL LEADERBOARD (Top Blade levels)
----------------------------------------------------------------------
-task.spawn(function()
-	local ok, board = pcall(function()
-		return DataStoreService:GetOrderedDataStore(Config.LeaderboardStoreName)
-	end)
-	if not ok then
-		map.LeaderboardText.Text = "Leaderboard needs\nStudio API access"
-		return
-	end
-	local names = {}
-	while true do
-		for _, player in ipairs(Players:GetPlayers()) do
-			local data = DataService.Get(player)
-			if data then
-				pcall(function()
-					board:SetAsync(tostring(player.UserId), math.floor(data.Blade))
-				end)
-			end
-		end
-		local success, pages = pcall(function()
-			return board:GetSortedAsync(false, 10)
-		end)
-		if success and pages then
-			local lines = {}
-			for rank, entry in ipairs(pages:GetCurrentPage()) do
-				local userId = tonumber(entry.key)
-				local name = userId and names[userId]
-				if userId and not name then
-					local okName, result = pcall(Players.GetNameFromUserIdAsync, Players, userId)
-					name = okName and result or ("User " .. entry.key)
-					names[userId] = name
-				end
-				local color = rank == 1 and "#ffd75a" or (rank == 2 and "#dfe6f0" or (rank == 3 and "#ff9e5a" or "#ffffff"))
-				table.insert(lines, string.format('<font color="%s">%d. %s</font>  +%s', color, rank, name or "?", Format.Abbrev(entry.value)))
-			end
-			map.LeaderboardText.Text = #lines > 0 and table.concat(lines, "\n") or "No blades forged yet!"
-		else
-			map.LeaderboardText.Text = "Leaderboard unavailable\n(enable Studio API access)"
-		end
-		task.wait(90)
 	end
 end)
 

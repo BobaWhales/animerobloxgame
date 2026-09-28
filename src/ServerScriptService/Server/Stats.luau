@@ -44,7 +44,20 @@ function Stats.ZenkaiActive(player: Player): boolean
 end
 
 ---------------------------------------------------------------------
--- WEAPON
+-- GLOBAL EVENTS (admin abuse: 2x luck, 3x coins...)
+---------------------------------------------------------------------
+Stats.ActiveEvents = {} :: { [string]: { EndsAt: number, Mult: number } }
+
+function Stats.EventMult(key: string): number
+	local e = Stats.ActiveEvents[key]
+	if e and e.EndsAt > now() then
+		return e.Mult
+	end
+	return 1
+end
+
+---------------------------------------------------------------------
+-- WEAPON + ARMOR
 ---------------------------------------------------------------------
 -- Returns weaponDef, rarityDef, record (or starter defaults).
 function Stats.Weapon(player: Player)
@@ -55,14 +68,49 @@ function Stats.Weapon(player: Player)
 	return def, rarity, rec
 end
 
+-- Real value of an ore effect on the equipped weapon (0 if none).
+function Stats.Effect(player: Player, effectId: string): number
+	local _, _, rec = Stats.Weapon(player)
+	local pts = rec and rec.E and rec.E[effectId]
+	return pts and Config.EffectValue(effectId, pts) or 0
+end
+
 function Stats.HasPassive(player: Player, passiveId: string): boolean
 	local def, rarity = Stats.Weapon(player)
 	return rarity.Passive == true and def.Passive ~= nil and def.Passive.Id == passiveId
 end
 
+function Stats.Armor(player: Player)
+	local data = DataService.Get(player)
+	local rec = data and data.Armors[data.EquippedArmor]
+	if not rec then
+		return nil, nil, nil
+	end
+	return Config.ArmorById[rec.A], Config.WeaponRarityById[rec.R] or Config.WeaponRarities[1], rec
+end
+
+function Stats.ArmorBonus(player: Player, bonus: string): number
+	local def, rarity = Stats.Armor(player)
+	if def and rarity and def.Bonus == bonus then
+		return Config.ArmorBonusValue(bonus, rarity.Index)
+	end
+	return 0
+end
+
+-- Damage reduction from armour (capped).
+function Stats.Defense(player: Player): number
+	local def, rarity = Stats.Armor(player)
+	if not def or not rarity then
+		return 0
+	end
+	local d = Config.ArmorDefense[rarity.Index] or 0
+	d += Stats.ArmorBonus(player, "Guard")
+	return math.min(d, Config.Balance.DefenseCap)
+end
+
 function Stats.AttackSpeed(player: Player): number
 	local _, rarity = Stats.Weapon(player)
-	local bonus = rarity.AttackSpeed or 0
+	local bonus = (rarity.AttackSpeed or 0) + Stats.Effect(player, "Haste")
 	if Stats.HasPassive(player, "Released") then
 		bonus += 0.15
 	end
@@ -85,8 +133,9 @@ end
 ---------------------------------------------------------------------
 -- DAMAGE
 ---------------------------------------------------------------------
--- Gameplay multipliers (race, skin, rebirth, runes, buffs) are multiplied
--- together and HARD CAPPED at Config.Balance.DamageMultCap.
+-- Gameplay multipliers (race, skin, runes, buffs) are multiplied together
+-- and HARD CAPPED at Config.Balance.DamageMultCap. The exponential growth
+-- comes from Power (rebirths / ascensions / pads), which is not capped.
 function Stats.GameplayMult(player: Player): number
 	local data = DataService.Get(player)
 	if not data then
@@ -94,8 +143,7 @@ function Stats.GameplayMult(player: Player): number
 	end
 	local race = Stats.Race(data)
 	local mult = (race.Damage or 1) * Stats.Tier(data).Damage
-	mult *= 1 + data.Rebirths * Config.RebirthDamageBonus
-	mult *= 1 + data.Runes * Config.Tower.RuneDamageBonus
+	mult *= 1 + data.Runes * Config.BossRush.RuneDamageBonus
 	if Stats.OverdriveActive(player) then
 		mult *= Config.Overdrive.Damage
 	end
@@ -125,7 +173,7 @@ function Stats.Damage(player: Player): number
 	local def, rarity = Stats.Weapon(player)
 	local class = Config.WeaponClasses[def.Class]
 	local base = (Config.BaseDamage + data.Blade) * (1 + data.Power / Config.PowerDamageDivisor)
-	base *= (class and class.Base or 1) * (1 + rarity.Damage)
+	base *= (class and class.Base or 1) * (1 + rarity.Damage) * (1 + Stats.Effect(player, "Heavy"))
 	return base * Stats.GameplayMult(player) * Stats.PowerTierMult(player)
 end
 
@@ -135,7 +183,11 @@ function Stats.CritChance(player: Player): number
 		return 0
 	end
 	local race = Stats.Race(data)
-	return math.min(0.5, (Config.BaseCritChance + (race.Crit or 0)) * allStats(data))
+	local c = (Config.BaseCritChance + (race.Crit or 0)) * allStats(data) + Stats.Effect(player, "Crit")
+	if Stats.HasPassive(player, "Moonlit") then
+		c += 0.1
+	end
+	return math.min(0.6, c)
 end
 
 function Stats.CritMult(): number
@@ -147,6 +199,8 @@ function Stats.StaminaCost(player: Player, base: number): number
 	if Stats.HasPassive(player, "ChakraFlow") then
 		cost *= 0.8
 	end
+	cost *= 1 - Stats.Effect(player, "Ki")
+	cost *= 1 - Stats.ArmorBonus(player, "Stamina")
 	return cost
 end
 
@@ -155,25 +209,39 @@ function Stats.Cooldown(player: Player, skillId: string, base: number): number
 	if skillId == "GetsugaTensho" and Stats.HasPassive(player, "Released") then
 		cd *= 0.8
 	end
+	if Stats.HasPassive(player, "Wisdom") then
+		cd *= 0.85
+	end
+	cd *= 1 - Stats.Effect(player, "Chrono")
 	return cd
 end
 
 ---------------------------------------------------------------------
--- POWER / LUCK / COINS / BACKPACK / FORGE / SPEED
+-- POWER / LUCK / COINS / BACKPACK / FORGE / SPEED  (exponential)
 ---------------------------------------------------------------------
+function Stats.PrestigeMult(data, kind: string): number
+	if kind == "Power" then
+		return Config.Rebirth.PowerMult ^ data.Rebirths * Config.Ascension.PowerMult ^ data.Ascensions
+	end
+	return Config.Rebirth.CoinMult ^ data.Rebirths * Config.Ascension.CoinMult ^ data.Ascensions
+end
+
 function Stats.PowerMult(player: Player): number
 	local data = DataService.Get(player)
 	if not data then
 		return 1
 	end
 	local race = Stats.Race(data)
-	local per = Stats.HasPass(player, "DoubleTraining") and 0.2 or 0.1
-	local mult = (1 + data.Rebirths * Config.RebirthPowerBonus) * (1 + data.Upgrades.Training * per)
+	local mult = Stats.PrestigeMult(data, "Power") * (1 + data.Upgrades.Training * Config.Upgrades.Training.Per)
 	mult *= (race.Power or 1) * allStats(data)
+	if Stats.HasPass(player, "DoubleTraining") then
+		mult *= 2
+	end
 	if Stats.OverdriveActive(player) then
 		mult *= Config.Overdrive.Power
 	end
-	return mult
+	mult *= 1 + Stats.ArmorBonus(player, "Power")
+	return mult * Stats.EventMult("Power")
 end
 
 function Stats.Luck(player: Player): number
@@ -182,11 +250,12 @@ function Stats.Luck(player: Player): number
 		return 1
 	end
 	local race = Stats.Race(data)
-	local luck = (1 + data.Upgrades.Luck * 0.05) * (race.Luck or 1) * allStats(data)
+	local luck = (1 + data.Upgrades.Luck * Config.Upgrades.Luck.Per) * (race.Luck or 1) * allStats(data)
 	if Stats.HasPass(player, "DoubleLuck") then
 		luck *= 2
 	end
-	return luck
+	luck *= (1 + Stats.Effect(player, "Greed")) * (1 + Stats.ArmorBonus(player, "Luck"))
+	return luck * Stats.EventMult("Luck")
 end
 
 function Stats.CoinMult(player: Player): number
@@ -195,11 +264,12 @@ function Stats.CoinMult(player: Player): number
 		return 1
 	end
 	local race = Stats.Race(data)
-	local mult = (1 + data.Rebirths * Config.RebirthCoinBonus) * (race.Coins or 1) * allStats(data)
+	local mult = Stats.PrestigeMult(data, "Coins") * (race.Coins or 1) * allStats(data)
 	if Stats.HasPass(player, "DoubleCoins") then
 		mult *= 2
 	end
 	mult *= 1 + math.min(data.Streak * Config.Daily.CoinBonusPerDay, Config.Daily.MaxCoinBonus)
+	mult *= 1 + Stats.Effect(player, "Fortune")
 	-- Pirate crew aura: +10% if another Pirate is nearby
 	local char = player.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -216,7 +286,7 @@ function Stats.CoinMult(player: Player): number
 			end
 		end
 	end
-	return mult
+	return mult * Stats.EventMult("Coins")
 end
 
 function Stats.BackpackMax(player: Player): number
@@ -224,7 +294,7 @@ function Stats.BackpackMax(player: Player): number
 	if not data then
 		return Config.BaseBackpack
 	end
-	local cap = Config.BaseBackpack + data.Upgrades.Backpack * 10
+	local cap = Config.BaseBackpack + data.Upgrades.Backpack * Config.Upgrades.Backpack.Per
 	if Stats.HasPass(player, "ExtraBackpack") then
 		cap = math.floor(cap * 1.5)
 	end
@@ -258,6 +328,10 @@ function Stats.WalkSpeed(player: Player): number
 	if Stats.OverdriveActive(player) then
 		speed *= Config.Overdrive.Speed
 	end
+	if Stats.HasPassive(player, "Tailwind") then
+		speed *= 1.15
+	end
+	speed *= 1 + Stats.ArmorBonus(player, "Speed")
 	return speed
 end
 
@@ -274,28 +348,29 @@ function Stats.OverdriveDuration(player: Player): number
 end
 
 function Stats.RebirthReq(data): number
-	return math.floor(Config.RebirthBasePower * Config.RebirthPowerGrowth ^ data.Rebirths)
+	return Config.RebirthReq(data.Rebirths, data.Ascensions)
 end
 
 function Stats.UpgradeCost(key: string, level: number): number?
-	local u = Config.Upgrades[key]
-	if not u or level >= u.Max then
+	if not Config.Upgrades[key] then
 		return nil
 	end
-	return math.floor(u.Base * u.Growth ^ level)
+	return Config.UpgradeCost(key, level)
 end
 
+-- (ascensions, rebirths) compared in order, so pads stay unlocked after an
+-- ascension resets your rebirth count.
 function Stats.PadUnlocked(data, pad): boolean
-	return data.Power >= pad.Power and data.Rebirths >= pad.Rebirths
+	local a = data.Ascensions or 0
+	if a ~= (pad.Ascensions or 0) then
+		return a > (pad.Ascensions or 0)
+	end
+	return data.Rebirths >= (pad.Rebirths or 0)
 end
 
+-- A stage is open once the one before it is cleared.
 function Stats.StageUnlocked(data, stageIndex: number): boolean
-	local stage = Config.Stages[stageIndex]
-	if not stage then
-		return false
-	end
-	local zone = Config.Zones[stage.Zone]
-	return data.Power >= stage.PowerReq and data.Blade >= (zone.BladeReq or 0)
+	return Config.Stages[stageIndex] ~= nil and data.Stage >= stageIndex - 1
 end
 
 ---------------------------------------------------------------------
@@ -341,6 +416,16 @@ end
 ---------------------------------------------------------------------
 -- SNAPSHOT sent to the client
 ---------------------------------------------------------------------
+function Stats.EventList()
+	local list = {}
+	for key, e in pairs(Stats.ActiveEvents) do
+		if e.EndsAt > now() then
+			list[key] = { EndsAt = e.EndsAt, Mult = e.Mult }
+		end
+	end
+	return list
+end
+
 function Stats.Snapshot(player: Player)
 	local data = DataService.Get(player)
 	local s = DataService.Session(player)
@@ -389,7 +474,17 @@ function Stats.Snapshot(player: Player)
 		Cosmetics = data.Cosmetics,
 		Explored = data.Explored,
 		PlaytimeClaimed = s.PlaytimeClaimed,
+		Stage = data.Stage,
+		StageKills = data.StageKills,
+		Ascensions = data.Ascensions,
+		AscendReq = Config.AscendReq(data.Ascensions),
+		Armors = data.Armors,
+		EquippedArmor = data.EquippedArmor,
+		Recipes = data.Recipes,
+		Events = Stats.EventList(),
+		IsAdmin = player:GetAttribute("IsAdmin") == true,
 		Derived = {
+			Defense = Stats.Defense(player),
 			PowerMult = Stats.PowerTierMult(player),
 			GameplayMult = Stats.GameplayMult(player),
 			AttackSpeed = Stats.AttackSpeed(player),
