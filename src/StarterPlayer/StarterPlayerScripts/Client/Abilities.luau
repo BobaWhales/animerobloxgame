@@ -20,6 +20,7 @@ local Shared = ReplicatedStorage:WaitForChild("GameShared")
 local Config = require(Shared:WaitForChild("Config"))
 local VFX = require(Shared:WaitForChild("VFX"))
 local SFX = require(Shared:WaitForChild("SFX"))
+local ProcAnim = require(script.Parent:WaitForChild("ProcAnim"))
 
 local Abilities = {}
 -- classes aimed with an outstretched arm, and classes without the two-hand
@@ -143,6 +144,13 @@ local function play(name: string, speed: number?)
 	return t
 end
 
+-- R15: procedural combat animation (Client/ProcAnim); R6 falls back to tracks.
+local function isR15(): boolean
+	local c = player.Character
+	local h = c and c:FindFirstChildOfClass("Humanoid")
+	return h ~= nil and h.RigType == Enum.HumanoidRigType.R15
+end
+
 local function rightHand(): BasePart?
 	local c = player.Character
 	return c and (c:FindFirstChild("RightHand") or c:FindFirstChild("Right Arm")) :: any
@@ -239,12 +247,20 @@ local function tryAttack()
 	feedback("Action")
 
 	local color = def.Glow or rarity.Color
+	if isR15() then
+		ProcAnim.Attack(player.Character, def.Class, combo)
+		ProcAnim.TrailBurst(player.Character, 0.3)
+	end
 	if class.Kind == "Ranged" then
-		play(POINT[def.Class] and "Point" or "Slash", 1.6)
+		if not isR15() then
+			play(POINT[def.Class] and "Point" or "Slash", 1.6)
+		end
 		VFX.Muzzle(muzzlePosition(dir), dir, color)
 	else
 		local big = combo == #class.Combo
-		play(big and "Lunge" or "Slash", 1 + (1 - class.Interval) * 0.6)
+		if not isR15() then
+			play(big and "Lunge" or "Slash", 1 + (1 - class.Interval) * 0.6)
+		end
 		local scale = class.Range / 9 * (big and 1.25 or 1)
 		VFX.Slash(root.CFrame * CFrame.new(0, 0.6, 0), color, scale, combo % 2 == 0)
 		if big then
@@ -303,6 +319,7 @@ local function tryDash()
 	remote:FireServer("Dash", { Aim = flat(dir) })
 	feedback("Action")
 	doDash(dir, B.DashDistanceSpeed, B.DashDuration)
+	ProcAnim.Play(player.Character, "Dash", 0.35)
 	SFX.Play("Dash")
 	VFX.FOVPunch(6)
 end
@@ -325,6 +342,17 @@ end
 
 -- local movement for dash-type skills (server does the damage)
 local function skillMovement(skill, dir: Vector3, charge: number?)
+	if isR15() then
+		local def = weapon()
+		local ult = Config.Skills[Config.WeaponClasses[def.Class].Ultimate] == skill
+		ProcAnim.Skill(player.Character, def.Class, ult and "R" or "E")
+		ProcAnim.TrailBurst(player.Character, 0.45)
+		if skill.Type == "DashStrike" or skill.Type == "ChargeLunge" then
+			local dur = 0.22
+			doDash(dir, skill.Distance / dur, dur)
+		end
+		return
+	end
 	if skill.Type == "DashStrike" or skill.Type == "ChargeLunge" then
 		local dur = 0.22
 		doDash(dir, skill.Distance / dur, dur)

@@ -2,6 +2,9 @@
 -- WeaponModels (ModuleScript) -> ReplicatedStorage/GameShared/WeaponModels
 -- Builds every weapon from parts (no uploads needed). Rarity adds glow,
 -- trails (Epic+), light + sparkles (Legendary+) and an aura (Mythic).
+-- Swords are sleek arena-style blades (tapered wedge tips, a glowing core
+-- stripe, winged guards) and every weapon carries a crisp "SwingTrail"
+-- that the client flashes on each swing (Client/ProcAnim).
 -- Models are built with the blade along +Y of the "Grip" part.
 
 local Config = require(script.Parent:WaitForChild("Config"))
@@ -50,6 +53,36 @@ local function part(m: Model, grip: BasePart, props, cf: CFrame): Part
 	return p
 end
 
+local function wedge(m: Model, grip: BasePart, props, cf: CFrame): WedgePart
+	local p = Instance.new("WedgePart")
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.Massless = true
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Material = Enum.Material.Metal
+	for k, v in pairs(props) do
+		(p :: any)[k] = v
+	end
+	p.CFrame = grip.CFrame * cf
+	local w = Instance.new("WeldConstraint")
+	w.Part0 = grip
+	w.Part1 = p
+	w.Parent = p
+	p.Parent = m
+	return p
+end
+
+-- Tapered blade tip: two mirrored wedges meeting at a point (+Y). A
+-- WedgePart is tallest on its +Z face, so each half is turned to put its
+-- tall face on the blade's centre line.
+local function tip(m: Model, grip: BasePart, y: number, width: number, thick: number, len: number, color: Color3, material: Enum.Material?)
+	for _, side in ipairs({ -1, 1 }) do
+		wedge(m, grip, { Name = "Tip", Size = Vector3.new(thick, len, width / 2), Color = color, Material = material or Enum.Material.Metal, Reflectance = 0.15 }, CFrame.new(0, y + len / 2, side * width / 4) * CFrame.Angles(0, side == 1 and math.pi or 0, 0))
+	end
+end
+
 local function attach(parent: BasePart, name: string, pos: Vector3): Attachment
 	local a = Instance.new("Attachment")
 	a.Name = name
@@ -86,40 +119,62 @@ local builders = {}
 
 builders.Katana = function(w, glow)
 	local m, grip = newModel(w.Name)
-	part(m, grip, { Name = "Handle", Size = Vector3.new(0.24, 1.2, 0.24), Color = w.Accent, Material = Enum.Material.Fabric }, CFrame.new(0, 0, 0))
-	part(m, grip, { Name = "Pommel", Size = Vector3.new(0.28, 0.12, 0.28), Color = Color3.fromRGB(200, 170, 90) }, CFrame.new(0, -0.66, 0))
-	part(m, grip, { Name = "Tsuba", Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.1, 0.62, 0.62), Color = Color3.fromRGB(40, 35, 30) }, CFrame.new(0, 0.65, 0) * CFrame.Angles(0, 0, math.rad(90)))
-	local len = 4 + (w.Rarity == "Legendary" and 0.4 or 0)
-	local blade = part(m, grip, { Name = "Blade", Size = Vector3.new(0.07, len, 0.26), Color = w.Blade, Reflectance = 0.2 }, CFrame.new(0, 0.7 + len / 2, 0))
-	part(m, grip, { Name = "Tip", Size = Vector3.new(0.07, 0.19, 0.19), Color = w.Blade }, CFrame.new(0, 0.7 + len, 0.04) * CFrame.Angles(math.rad(45), 0, 0))
-	if glow then
-		part(m, grip, { Name = "Edge", Size = Vector3.new(0.08, len * 0.96, 0.05), Color = glow, Material = Enum.Material.Neon }, CFrame.new(0, 0.7 + len / 2, 0.13))
+	local core = glow or w.Blade:Lerp(WHITE, 0.4)
+	-- handle with wrap bands + a gem pommel
+	part(m, grip, { Name = "Handle", Size = Vector3.new(0.22, 1.25, 0.22), Color = Color3.fromRGB(28, 26, 34), Material = Enum.Material.SmoothPlastic }, CFrame.new(0, 0, 0))
+	for i = -2, 2 do
+		part(m, grip, { Name = "Wrap", Size = Vector3.new(0.25, 0.06, 0.25), Color = w.Accent, Material = Enum.Material.Fabric }, CFrame.new(0, i * 0.24, 0))
 	end
+	part(m, grip, { Name = "Pommel", Shape = Enum.PartType.Ball, Size = Vector3.one * 0.26, Color = core, Material = Enum.Material.Neon }, CFrame.new(0, -0.68, 0))
+	-- winged guard
+	part(m, grip, { Name = "Guard", Size = Vector3.new(0.16, 0.14, 0.5), Color = Color3.fromRGB(34, 32, 40) }, CFrame.new(0, 0.66, 0))
+	for _, side in ipairs({ -1, 1 }) do
+		wedge(m, grip, { Name = "GuardWing", Size = Vector3.new(0.12, 0.34, 0.42), Color = w.Accent }, CFrame.new(0, 0.74, side * 0.42) * CFrame.Angles(0, side == 1 and 0 or math.pi, 0))
+	end
+	part(m, grip, { Name = "GuardGem", Shape = Enum.PartType.Ball, Size = Vector3.one * 0.18, Color = core, Material = Enum.Material.Neon }, CFrame.new(0, 0.66, 0))
+	-- blade: steel body, glowing core stripe, bright edge, tapered tip
+	local len = 3.9 + (w.Rarity == "Legendary" and 0.4 or 0)
+	local base = 0.74
+	local blade = part(m, grip, { Name = "Blade", Size = Vector3.new(0.06, len, 0.3), Color = w.Blade, Reflectance = 0.25 }, CFrame.new(0, base + len / 2, 0))
+	part(m, grip, { Name = "Core", Size = Vector3.new(0.07, len * 0.94, 0.07), Color = core, Material = Enum.Material.Neon }, CFrame.new(0, base + len * 0.49, -0.02))
+	part(m, grip, { Name = "Edge", Size = Vector3.new(0.065, len, 0.035), Color = glow or WHITE, Material = Enum.Material.Neon }, CFrame.new(0, base + len / 2, 0.15))
+	tip(m, grip, base + len, 0.3, 0.06, 0.55, w.Blade)
 	attach(blade, "TrailA", Vector3.new(0, -len / 2 + 0.2, 0))
-	attach(blade, "TrailB", Vector3.new(0, len / 2, 0))
+	attach(blade, "TrailB", Vector3.new(0, len / 2 + 0.5, 0))
 	return m, blade
 end
 
 builders.Greatsword = function(w, glow)
 	local m, grip = newModel(w.Name)
-	part(m, grip, { Name = "Handle", Size = Vector3.new(0.34, 1.7, 0.34), Color = w.Accent, Material = Enum.Material.Fabric }, CFrame.new(0, 0, 0))
-	part(m, grip, { Name = "Guard", Size = Vector3.new(0.45, 0.35, 1.5), Color = Color3.fromRGB(60, 55, 60) }, CFrame.new(0, 0.95, 0))
-	local len = 5.6
-	local blade = part(m, grip, { Name = "Blade", Size = Vector3.new(0.2, len, 1.35), Color = w.Blade, Reflectance = 0.1 }, CFrame.new(0, 1.1 + len / 2, 0.1))
-	part(m, grip, { Name = "Tip", Size = Vector3.new(0.2, 0.95, 0.95), Color = w.Blade }, CFrame.new(0, 1.1 + len, 0.1) * CFrame.Angles(math.rad(45), 0, 0))
-	part(m, grip, { Name = "Spine", Size = Vector3.new(0.22, len * 0.97, 0.12), Color = w.Accent }, CFrame.new(0, 1.1 + len / 2, -0.55))
-	if glow then
-		part(m, grip, { Name = "Edge", Size = Vector3.new(0.22, len * 0.97, 0.08), Color = glow, Material = Enum.Material.Neon }, CFrame.new(0, 1.1 + len / 2, 0.78))
+	local core = glow or w.Blade:Lerp(WHITE, 0.4)
+	part(m, grip, { Name = "Handle", Size = Vector3.new(0.3, 1.7, 0.3), Color = Color3.fromRGB(28, 26, 34), Material = Enum.Material.SmoothPlastic }, CFrame.new(0, 0, 0))
+	for i = -3, 3 do
+		part(m, grip, { Name = "Wrap", Size = Vector3.new(0.33, 0.07, 0.33), Color = w.Accent, Material = Enum.Material.Fabric }, CFrame.new(0, i * 0.24, 0))
 	end
+	part(m, grip, { Name = "Pommel", Shape = Enum.PartType.Ball, Size = Vector3.one * 0.36, Color = core, Material = Enum.Material.Neon }, CFrame.new(0, -0.95, 0))
+	-- heavy spiked guard
+	part(m, grip, { Name = "Guard", Size = Vector3.new(0.4, 0.34, 1.7), Color = Color3.fromRGB(40, 38, 46) }, CFrame.new(0, 0.97, 0.05))
+	for _, side in ipairs({ -1, 1 }) do
+		wedge(m, grip, { Name = "GuardSpike", Size = Vector3.new(0.3, 0.7, 0.5), Color = w.Accent }, CFrame.new(0, 1.2, side * 0.95) * CFrame.Angles(0, side == 1 and 0 or math.pi, 0))
+	end
+	part(m, grip, { Name = "GuardGem", Shape = Enum.PartType.Ball, Size = Vector3.one * 0.3, Color = core, Material = Enum.Material.Neon }, CFrame.new(0, 0.97, -0.02))
+	local len = 5.4
+	local base = 1.14
+	local blade = part(m, grip, { Name = "Blade", Size = Vector3.new(0.18, len, 1.3), Color = w.Blade, Reflectance = 0.12 }, CFrame.new(0, base + len / 2, 0.08))
+	-- fuller: a long glowing slot down the middle of the blade
+	part(m, grip, { Name = "Core", Size = Vector3.new(0.2, len * 0.8, 0.24), Color = core, Material = Enum.Material.Neon }, CFrame.new(0, base + len * 0.45, 0.02))
+	part(m, grip, { Name = "Spine", Size = Vector3.new(0.2, len, 0.12), Color = w.Accent }, CFrame.new(0, base + len / 2, -0.58))
+	part(m, grip, { Name = "Edge", Size = Vector3.new(0.2, len, 0.07), Color = glow or WHITE, Material = Enum.Material.Neon }, CFrame.new(0, base + len / 2, 0.75))
+	tip(m, grip, base + len, 1.3, 0.18, 1.1, w.Blade)
 	if w.Id == "Zangetsu" then
 		-- cloth wrap + chain at the pommel
 		for i = 1, 4 do
-			part(m, grip, { Name = "Chain", Shape = Enum.PartType.Ball, Size = Vector3.one * 0.22, Color = Color3.fromRGB(200, 200, 210) }, CFrame.new(0, -0.9 - i * 0.22, 0.05 * i))
+			part(m, grip, { Name = "Chain", Shape = Enum.PartType.Ball, Size = Vector3.one * 0.22, Color = Color3.fromRGB(200, 200, 210) }, CFrame.new(0, -0.95 - i * 0.22, 0.05 * i))
 		end
-		part(m, grip, { Name = "Wrap", Size = Vector3.new(0.36, 1.2, 0.36), Color = WHITE, Material = Enum.Material.Fabric }, CFrame.new(0, 0.1, 0))
+		part(m, grip, { Name = "Cloth", Size = Vector3.new(0.36, 1.2, 0.36), Color = WHITE, Material = Enum.Material.Fabric }, CFrame.new(0, 0.1, 0))
 	end
 	attach(blade, "TrailA", Vector3.new(0, -len / 2 + 0.3, 0))
-	attach(blade, "TrailB", Vector3.new(0, len / 2, 0))
+	attach(blade, "TrailB", Vector3.new(0, len / 2 + 1, 0))
 	return m, blade
 end
 
@@ -374,6 +429,23 @@ local function dress(m: Model, effectPart: BasePart, w, rarity, glow: Color3)
 	end
 	local a0 = m:FindFirstChild("TrailA", true)
 	local a1 = m:FindFirstChild("TrailB", true)
+	-- crisp swing trail, flashed by the client on every swing
+	if a0 and a1 then
+		local sw = Instance.new("Trail")
+		sw.Name = "SwingTrail"
+		sw.Enabled = false
+		sw.Attachment0 = a0
+		sw.Attachment1 = a1
+		sw.Lifetime = 0.16
+		sw.MinLength = 0.02
+		sw.LightEmission = 1
+		sw.LightInfluence = 0
+		sw.FaceCamera = false
+		sw.Transparency = VFX.NS(0, 0.05, 0.6, 0.55, 1, 1)
+		sw.WidthScale = VFX.NS(0, 1, 1, 0.3)
+		sw.Color = ColorSequence.new(WHITE, glow)
+		sw.Parent = effectPart
+	end
 	if rarity.Trail and a0 and a1 then
 		local tr = Instance.new("Trail")
 		tr.Name = "RarityTrail"

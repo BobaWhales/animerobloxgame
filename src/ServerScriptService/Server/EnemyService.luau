@@ -1,30 +1,21 @@
 --!nonstrict
 -- EnemyService (ModuleScript) -> ServerScriptService/Server/EnemyService
--- Anime avatar enemies on the Path:
---   * Dressed from the Roblox catalog (like Catalog Avatar Creator): each
---     stage searches AvatarEditorService for its theme keywords (hair, hat /
---     mask, shirt, pants; Config.EnemyAvatars) and wears real items.
---   * Stages only spawn enemies while a player is near (Config.StageSleepTime).
---   * Killing enemies in your next stage counts toward opening its gate.
---   * R15 rigs built from a HumanoidDescription (optional catalog hair /
---     accessories / Shirt / Pants ids from Config.EnemyCatalog) plus
---     procedural anime hair; falls back to a hand-built R6 rig if needed.
+-- Chibi anime enemies for the Dungeon and the Boss Rush:
+--   * Built by code from Config.EnemyArchetypes (big head, big anime eyes,
+--     bold hair, outfit, gear and a weapon) on an R15 rig, so the default
+--     Roblox animations still work. Optional catalog dressing via
+--     Config.EnemyModelStyle = "Catalog".
+--   * Enemies are spawned on demand by DungeonService (only when you walk
+--     into a room) and TowerService; each belongs to one player.
 --   * Animator with preloaded Idle / Walk / Run / BasicAttack /
 --     SpecialWindup / SpecialRelease tracks.
 --   * PathfindingService chasing + AI state machine for special attacks:
 --     cooldown/proximity check -> wind-up anim + ground telegraph ->
 --     release; damage lands on the animation's "Hit" keyframe/marker
 --     (AnimationTrack.KeyframeReached) with a timed fallback.
---   * Modern silhouettes: every enemy type has a distinct readable shape
---     (pauldrons, horns, straw hat, cape, halo, pylons...) with flat clean
---     colours and glowing focal points: eyes + a chest core. The core dims
---     and flickers as HP drops (Client/EnemyFX), so there is no heavy
---     health bar over their heads.
---   * Visual tiers: stage 3+ of a zone adds armour plating, stage 4+ glowing
---     runes; elites switch to a dark-gold palette; bosses get everything.
---   * Attack rhythm: anticipation (lean back, eyes flare) -> strike ->
---     recovery (slumped, core dim, takes extra damage). Poses are sent as
---     model attributes and animated on each client.
+--   * Attack rhythm: anticipation (lean back) -> strike -> recovery
+--     (slumped, takes extra damage). Poses are sent as model attributes and
+--     animated on each client (Client/EnemyFX).
 
 local Players = game:GetService("Players")
 local AvatarEditorService = game:GetService("AvatarEditorService")
@@ -46,6 +37,7 @@ local EnemyService = {}
 EnemyService.Active = {} :: { any }
 EnemyService.OnZenkai = nil :: ((Player) -> ())?
 EnemyService.OnKill = nil :: ((Player, any) -> ())?
+EnemyService.OnReward = nil :: ((Player, any) -> ())? -- per damager (mastery...)
 
 local map = nil
 local templates = {}
@@ -54,9 +46,9 @@ local AI = Config.EnemyAI
 local B = Config.Balance
 
 ---------------------------------------------------------------------
--- RIG BUILDING
+-- RIG BUILDING  (chibi anime figures, built entirely by code)
 ---------------------------------------------------------------------
-local function weldTo(head: BasePart, p: BasePart)
+local function weldTo(anchor: BasePart, p: BasePart)
 	p.Anchored = false
 	p.CanCollide = false
 	p.CanQuery = false
@@ -65,24 +57,10 @@ local function weldTo(head: BasePart, p: BasePart)
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.BottomSurface = Enum.SurfaceType.Smooth
 	local w = Instance.new("WeldConstraint")
-	w.Part0 = head
+	w.Part0 = anchor
 	w.Part1 = p
 	w.Parent = p
-	p.Parent = head.Parent
-end
-
-local function hairPart(head: BasePart, name: string, size: Vector3, offset: CFrame, color: Color3, shape: Enum.PartType?, material: Enum.Material?)
-	local p = Instance.new("Part")
-	p.Name = name
-	p.Size = size
-	if shape then
-		p.Shape = shape
-	end
-	p.Color = color
-	p.Material = material or Enum.Material.SmoothPlastic
-	p.CFrame = head.CFrame * offset
-	weldTo(head, p)
-	return p
+	p.Parent = anchor.Parent
 end
 
 -- Welded decoration on any body part (flat, clean materials).
@@ -105,204 +83,465 @@ local function bodyPart(model: Model, r15: string, r6: string): BasePart?
 	return (model:FindFirstChild(r15) or model:FindFirstChild(r6)) :: any
 end
 
--- Procedural anime hair + accessories (used when no catalog hair is set).
-local function decorate(model: Model, look)
+local function has(list, item: string): boolean
+	return list ~= nil and table.find(list, item) ~= nil
+end
+
+local HEAD_SCALE = 1.55 -- chibi proportions: big head on a small body
+local DARK = Color3.fromRGB(28, 24, 32)
+local WHITE = Color3.fromRGB(250, 250, 252)
+
+-- Blow the head up and re-seat it on the neck.
+local function chibify(model: Model)
 	local head = model:FindFirstChild("Head") :: BasePart?
 	if not head then
 		return
 	end
-	local hs = head.Size
-	local u = math.min(hs.X, hs.Y, hs.Z) -- unit size of the head
-	local c = look.HairColor
-	-- hair cap
-	hairPart(head, "HairCap", Vector3.new(hs.X * 1.1, hs.Y * 0.75, hs.Z * 1.12), CFrame.new(0, hs.Y * 0.28, u * 0.06), c, Enum.PartType.Ball)
-	if look.Hair == "Spiky" then
-		for i = 1, 8 do
-			local a = (i / 8) * math.pi * 2
-			local tilt = CFrame.Angles(math.rad(35) * math.cos(a), 0, math.rad(35) * math.sin(a))
-			hairPart(head, "Spike", Vector3.new(u * 0.32, u * 0.95, u * 0.32), CFrame.new(math.sin(a) * u * 0.35, hs.Y * 0.55, math.cos(a) * u * 0.3 + u * 0.1) * tilt, c)
-		end
-		for i = -1, 1 do
-			hairPart(head, "Bang", Vector3.new(u * 0.3, u * 0.55, u * 0.2), CFrame.new(i * u * 0.3, hs.Y * 0.28, -hs.Z * 0.45) * CFrame.Angles(math.rad(-20), 0, math.rad(i * 15)), c)
-		end
-	elseif look.Hair == "Long" then
-		hairPart(head, "BackHair", Vector3.new(hs.X * 1.05, hs.Y * 1.7, u * 0.35), CFrame.new(0, -hs.Y * 0.25, hs.Z * 0.5), c)
-		for _, side in ipairs({ -1, 1 }) do
-			hairPart(head, "SideHair", Vector3.new(u * 0.22, hs.Y * 1.1, u * 0.5), CFrame.new(side * hs.X * 0.52, -hs.Y * 0.1, 0), c)
-		end
-		hairPart(head, "Fringe", Vector3.new(hs.X * 1.02, u * 0.3, u * 0.2), CFrame.new(0, hs.Y * 0.32, -hs.Z * 0.45) * CFrame.Angles(math.rad(-15), 0, 0), c)
-	elseif look.Hair == "Bun" then
-		hairPart(head, "Bun", Vector3.one * u * 0.6, CFrame.new(0, hs.Y * 0.55, hs.Z * 0.35), c, Enum.PartType.Ball)
-		hairPart(head, "Fringe", Vector3.new(hs.X * 1.02, u * 0.3, u * 0.2), CFrame.new(0, hs.Y * 0.3, -hs.Z * 0.45) * CFrame.Angles(math.rad(-15), 0, 0), c)
+	local mesh = head:FindFirstChildOfClass("SpecialMesh")
+	head.Size *= HEAD_SCALE
+	if mesh and mesh.MeshType == Enum.MeshType.FileMesh then
+		mesh.Scale *= HEAD_SCALE
 	end
-	if look.Extra == "Headband" then
-		hairPart(head, "Headband", Vector3.new(hs.X * 1.08, u * 0.18, hs.Z * 1.08), CFrame.new(0, hs.Y * 0.15, 0), Color3.fromRGB(40, 50, 90))
-		hairPart(head, "Plate", Vector3.new(u * 0.5, u * 0.25, u * 0.06), CFrame.new(0, hs.Y * 0.15, -hs.Z * 0.56), Color3.fromRGB(200, 205, 215), nil, Enum.Material.Metal)
-	elseif look.Extra == "Horns" then
-		for _, side in ipairs({ -1, 1 }) do
-			hairPart(head, "Horn", Vector3.new(u * 0.2, u * 0.7, u * 0.2), CFrame.new(side * hs.X * 0.35, hs.Y * 0.7, 0) * CFrame.Angles(0, 0, math.rad(-side * 20)), Color3.fromRGB(240, 230, 220))
+	for _, d in ipairs(head:GetChildren()) do
+		if d:IsA("Attachment") then
+			d.Position *= HEAD_SCALE
+		elseif d:IsA("Decal") then
+			d:Destroy() -- replaced by anime eyes
 		end
-	elseif look.Extra == "Mask" then
-		hairPart(head, "Mask", Vector3.new(hs.X * 1.02, hs.Y * 0.4, u * 0.1), CFrame.new(0, -hs.Y * 0.22, -hs.Z * 0.5), Color3.fromRGB(25, 25, 30))
-	elseif look.Extra == "Crown" then
-		for i = 1, 5 do
-			local a = (i / 5) * math.pi * 2
-			hairPart(head, "Crown", Vector3.new(u * 0.15, u * 0.4, u * 0.15), CFrame.new(math.cos(a) * u * 0.4, hs.Y * 0.85, math.sin(a) * u * 0.4), Color3.fromRGB(255, 205, 60), nil, Enum.Material.Neon)
-		end
-	elseif look.Extra == "Visor" then
-		hairPart(head, "Visor", Vector3.new(hs.X * 1.05, u * 0.22, u * 0.1), CFrame.new(0, hs.Y * 0.05, -hs.Z * 0.52), look.HairColor, nil, Enum.Material.Neon)
+	end
+	local neck = model:FindFirstChild("Neck", true) :: Motor6D?
+	if neck and neck:IsA("Motor6D") then
+		neck.C1 = CFrame.new(neck.C1.Position * HEAD_SCALE) * neck.C1.Rotation
 	end
 end
 
--- Silhouette + focal points + tier dressing. level = stage position inside
--- its zone (1..StagesPerZone); boss looks get the full treatment.
-local STEEL = Color3.fromRGB(58, 62, 74)
-local function stylize(model: Model, look, level: number, catalogLook: boolean?)
-	local head = model:FindFirstChild("Head") :: BasePart?
-	local torso = bodyPart(model, "UpperTorso", "Torso")
-	local lArm = bodyPart(model, "LeftUpperArm", "Left Arm")
-	local rArm = bodyPart(model, "RightUpperArm", "Right Arm")
-	local lHand = bodyPart(model, "LeftHand", "Left Arm")
-	local rHand = bodyPart(model, "RightHand", "Right Arm")
-	if not head or not torso or not lArm or not rArm then
+-- Big anime eyes, angry brows, a small mouth.
+local function buildFace(head: BasePart, look)
+	local hs = head.Size
+	local u = math.min(hs.X, hs.Y, hs.Z)
+	local covered = has(look.Gear, "Mask") or has(look.Gear, "HollowMask") or has(look.Gear, "Blindfold")
+	if not covered then
+		for _, side in ipairs({ -1, 1 }) do
+			local base = CFrame.new(side * hs.X * 0.19, -hs.Y * 0.04, -hs.Z * 0.43)
+			local white = piece(head, "EyeWhite", Vector3.new(u * 0.25, u * 0.33, u * 0.1), base, WHITE, Enum.PartType.Ball)
+			white.CastShadow = false
+			piece(head, "Iris", Vector3.new(u * 0.19, u * 0.26, u * 0.1), base * CFrame.new(side * -u * 0.015, -u * 0.02, -u * 0.02), look.Eye or DARK, Enum.PartType.Ball).CastShadow = false
+			piece(head, "Pupil", Vector3.new(u * 0.09, u * 0.13, u * 0.1), base * CFrame.new(side * -u * 0.015, -u * 0.03, -u * 0.035), DARK, Enum.PartType.Ball).CastShadow = false
+			local shine = piece(head, "Shine", Vector3.new(u * 0.06, u * 0.06, u * 0.04), base * CFrame.new(side * u * 0.03, u * 0.07, -u * 0.05), WHITE, Enum.PartType.Ball, Enum.Material.Neon)
+			shine.CastShadow = false
+			-- angled brow = angry anime glare
+			piece(head, "Brow", Vector3.new(u * 0.26, u * 0.05, u * 0.05), CFrame.new(side * hs.X * 0.19, hs.Y * 0.15, -hs.Z * 0.46) * CFrame.Angles(0, 0, math.rad(side * 16)), look.HairColor or DARK).CastShadow = false
+		end
+		if has(look.Gear, "Eyepatch") then
+			piece(head, "Eyepatch", Vector3.new(u * 0.3, u * 0.36, u * 0.06), CFrame.new(hs.X * 0.19, -hs.Y * 0.04, -hs.Z * 0.48), DARK, Enum.PartType.Ball)
+			piece(head, "Strap", Vector3.new(hs.X * 1.04, u * 0.05, hs.Z * 1.04), CFrame.new(0, hs.Y * 0.06, 0) * CFrame.Angles(0, 0, math.rad(-14)), DARK)
+		end
+		if has(look.Gear, "Scouter") then
+			piece(head, "Scouter", Vector3.new(u * 0.3, u * 0.24, u * 0.05), CFrame.new(-hs.X * 0.21, -hs.Y * 0.02, -hs.Z * 0.5), Color3.fromRGB(80, 255, 120), nil, Enum.Material.Neon).Transparency = 0.35
+			piece(head, "ScouterArm", Vector3.new(u * 0.08, u * 0.3, u * 0.3), CFrame.new(-hs.X * 0.5, -hs.Y * 0.02, -hs.Z * 0.2), Color3.fromRGB(220, 220, 225))
+		end
+		if has(look.Gear, "Glasses") then
+			for _, side in ipairs({ -1, 1 }) do
+				local g = piece(head, "Glasses", Vector3.new(u * 0.04, u * 0.3, u * 0.3), CFrame.new(side * hs.X * 0.19, -hs.Y * 0.04, -hs.Z * 0.5) * CFrame.Angles(0, math.rad(90), 0), Color3.fromRGB(200, 220, 255), Enum.PartType.Cylinder, Enum.Material.Glass)
+				g.Transparency = 0.55
+			end
+		end
+	end
+	piece(head, "Mouth", Vector3.new(u * 0.14, u * 0.035, u * 0.04), CFrame.new(0, -hs.Y * 0.27, -hs.Z * 0.45), Color3.fromRGB(90, 40, 50)).CastShadow = false
+	if has(look.Gear, "Marks") then
+		for _, side in ipairs({ -1, 1 }) do
+			for k = 0, 1 do
+				piece(head, "Mark", Vector3.new(u * 0.16, u * 0.03, u * 0.03), CFrame.new(side * hs.X * 0.33, -hs.Y * (0.12 + k * 0.07), -hs.Z * 0.4) * CFrame.Angles(0, side * math.rad(25), 0), look.Trim or DARK).CastShadow = false
+			end
+		end
+	end
+end
+
+local function hair(head: BasePart, look)
+	local hs = head.Size
+	local u = math.min(hs.X, hs.Y, hs.Z)
+	local c = look.HairColor or DARK
+	local style = look.Hair or "Short"
+	local function hp(name, size, offset, shape)
+		return piece(head, name, size, offset, c, shape)
+	end
+	if style == "Bald" then
 		return
 	end
-	local core = look.Core or Color3.fromRGB(255, 80, 80)
-	local ts = torso.Size
-	local hs = head.Size
-	local u = ts.X / 2 -- body unit (about 1 stud at scale 1)
-
-	-- clean, flat materials (no busy textures) for procedural looks; catalog
-	-- avatars keep their real items and faces
-	if not catalogLook then
-		for _, d in ipairs(model:GetDescendants()) do
-			if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" and d.Material ~= Enum.Material.Neon then
-				d.Material = Enum.Material.SmoothPlastic
-				d.Reflectance = 0
-			elseif d:IsA("Decal") and d.Name == "face" then
-				d:Destroy()
-			end
+	-- cap that follows the skull
+	hp("HairCap", Vector3.new(hs.X * 1.08, hs.Y * 0.72, hs.Z * 1.1), CFrame.new(0, hs.Y * 0.26, u * 0.05), Enum.PartType.Ball)
+	if style == "Spiky" then
+		for i = 1, 9 do
+			local a = (i / 9) * math.pi * 2
+			local tilt = CFrame.Angles(math.rad(42) * math.cos(a), 0, math.rad(42) * math.sin(a))
+			hp("Spike", Vector3.new(u * 0.3, u * 0.9, u * 0.3), CFrame.new(math.sin(a) * u * 0.36, hs.Y * 0.52, math.cos(a) * u * 0.32 + u * 0.1) * tilt)
 		end
-	end
-
-	-- glowing eyes (angled "anime glare" slits) - procedural looks only
-	for _, side in ipairs(catalogLook and {} or { -1, 1 }) do
-		local eye = piece(head, "Eye", Vector3.new(hs.X * 0.24, hs.Y * 0.075, hs.Z * 0.06), CFrame.new(side * hs.X * 0.2, hs.Y * 0.04, -hs.Z * 0.5) * CFrame.Angles(0, 0, math.rad(-side * 14)), core, nil, Enum.Material.Neon)
-		eye.CastShadow = false
-	end
-	-- elemental core on the chest
-	local coreBall = piece(torso, "Core", Vector3.one * u * 0.42, CFrame.new(0, ts.Y * 0.12, -ts.Z * 0.5 - 0.02), core, Enum.PartType.Ball, Enum.Material.Neon)
-	local light = Instance.new("PointLight")
-	light.Name = "CoreLight"
-	light.Color = core
-	light.Range = 8
-	light.Brightness = 1.4
-	light.Shadows = false
-	light.Parent = coreBall
-	local ring = piece(torso, "CoreRing", Vector3.new(0.08, u * 0.62, u * 0.62), CFrame.new(0, ts.Y * 0.12, -ts.Z * 0.5 - 0.01) * CFrame.Angles(0, math.rad(90), 0), STEEL, Enum.PartType.Cylinder)
-	ring.CastShadow = false
-
-	local shirt = torso.Color
-	local dark = shirt:Lerp(Color3.new(0, 0, 0), 0.45)
-	local function shoulder(arm: BasePart, side: number, size: Vector3, color: Color3, shape: Enum.PartType?, name: string?)
-		return piece(arm, name or "Pauldron", size, CFrame.new(side * 0.1, arm.Size.Y * 0.38, 0), color, shape)
-	end
-	local sil = not catalogLook and look.Silhouette or nil
-	if sil == "Brawler" then
-		for _, pair in ipairs({ { lArm, -1 }, { rArm, 1 } }) do
-			shoulder(pair[1], pair[2], Vector3.new(u * 1.25, u * 0.85, u * 1.15), dark, Enum.PartType.Ball)
+		for i = -2, 2 do
+			hp("Bang", Vector3.new(u * 0.2, u * 0.46, u * 0.14), CFrame.new(i * u * 0.2, hs.Y * 0.3, -hs.Z * 0.44) * CFrame.Angles(math.rad(-22), 0, math.rad(i * 12)))
 		end
-		for _, hnd in ipairs({ lHand, rHand }) do
-			if hnd then
-				piece(hnd, "Wrap", Vector3.one * u * 0.7, CFrame.new(0, -hnd.Size.Y * 0.2, 0), Color3.fromRGB(235, 230, 220), Enum.PartType.Ball)
-			end
+	elseif style == "Messy" then
+		for i = 1, 12 do
+			local a = (i / 12) * math.pi * 2
+			hp("Tuft", Vector3.new(u * 0.34, u * 0.5, u * 0.34), CFrame.new(math.cos(a) * u * 0.42, hs.Y * (0.34 + (i % 3) * 0.06), math.sin(a) * u * 0.42) * CFrame.Angles(math.rad(20) * math.sin(a), a, math.rad(30) * math.cos(a)))
 		end
-	elseif sil == "Oni" then
+		for i = -1, 1 do
+			hp("Bang", Vector3.new(u * 0.26, u * 0.4, u * 0.14), CFrame.new(i * u * 0.26, hs.Y * 0.26, -hs.Z * 0.44) * CFrame.Angles(math.rad(-18), 0, math.rad(i * 20)))
+		end
+	elseif style == "Short" then
+		hp("Fringe", Vector3.new(hs.X * 1.02, u * 0.24, u * 0.18), CFrame.new(0, hs.Y * 0.3, -hs.Z * 0.44) * CFrame.Angles(math.rad(-12), 0, 0))
 		for _, side in ipairs({ -1, 1 }) do
-			piece(head, "BigHorn", Vector3.new(u * 0.26, u * 1.3, u * 0.26), CFrame.new(side * hs.X * 0.38, hs.Y * 0.75, -hs.Z * 0.05) * CFrame.Angles(math.rad(-12), 0, math.rad(-side * 28)), Color3.fromRGB(245, 235, 220), Enum.PartType.Block)
+			hp("Side", Vector3.new(u * 0.14, hs.Y * 0.45, u * 0.5), CFrame.new(side * hs.X * 0.5, hs.Y * 0.05, 0))
 		end
-		for i = 0, 2 do
-			piece(torso, "Spine", Vector3.new(u * 0.2, u * 0.55 - i * 0.08, u * 0.5), CFrame.new(0, ts.Y * (0.35 - i * 0.3), ts.Z * 0.5 + u * 0.15) * CFrame.Angles(math.rad(35), 0, 0), dark)
+	elseif style == "Long" or style == "Ponytail" or style == "Twin" or style == "Bun" then
+		hp("Fringe", Vector3.new(hs.X * 1.02, u * 0.28, u * 0.18), CFrame.new(0, hs.Y * 0.3, -hs.Z * 0.44) * CFrame.Angles(math.rad(-14), 0, 0))
+		for _, side in ipairs({ -1, 1 }) do
+			hp("SideLock", Vector3.new(u * 0.2, hs.Y * (style == "Long" and 1.05 or 0.6), u * 0.34), CFrame.new(side * hs.X * 0.5, -hs.Y * (style == "Long" and 0.25 or 0.05), -u * 0.1))
 		end
-	elseif sil == "Golem" then
-		local rock = Color3.fromRGB(120, 112, 105)
-		for _, pair in ipairs({ { lArm, -1 }, { rArm, 1 } }) do
-			shoulder(pair[1], pair[2], Vector3.new(u * 1.55, u * 1.15, u * 1.45), rock, Enum.PartType.Ball, "Boulder")
-		end
-		for _, hnd in ipairs({ lHand, rHand }) do
-			if hnd then
-				piece(hnd, "Fist", Vector3.one * u * 1.05, CFrame.new(0, -hnd.Size.Y * 0.3, 0), rock, Enum.PartType.Ball)
+		if style == "Long" then
+			hp("BackHair", Vector3.new(hs.X * 1.02, hs.Y * 1.6, u * 0.36), CFrame.new(0, -hs.Y * 0.22, hs.Z * 0.48))
+		elseif style == "Ponytail" then
+			hp("Tie", Vector3.one * u * 0.3, CFrame.new(0, hs.Y * 0.28, hs.Z * 0.5), Enum.PartType.Ball)
+			hp("Tail", Vector3.new(u * 0.38, hs.Y * 1.3, u * 0.38), CFrame.new(0, -hs.Y * 0.2, hs.Z * 0.66) * CFrame.Angles(math.rad(15), 0, 0))
+		elseif style == "Twin" then
+			for _, side in ipairs({ -1, 1 }) do
+				hp("TwinTail", Vector3.new(u * 0.34, hs.Y * 1.2, u * 0.34), CFrame.new(side * hs.X * 0.62, -hs.Y * 0.2, hs.Z * 0.2) * CFrame.Angles(0, 0, math.rad(side * 12)))
 			end
-		end
-		piece(torso, "BackRock", Vector3.new(ts.X * 0.9, ts.Y * 0.8, u * 0.8), CFrame.new(0, ts.Y * 0.2, ts.Z * 0.5 + u * 0.25), rock, Enum.PartType.Ball)
-	elseif sil == "Ronin" then
-		piece(head, "HatBrim", Vector3.new(u * 0.12, u * 3.6, u * 3.6), CFrame.new(0, hs.Y * 0.62, 0) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(205, 175, 110), Enum.PartType.Cylinder)
-		piece(head, "HatCrown", Vector3.new(u * 0.55, u * 1.3, u * 1.3), CFrame.new(0, hs.Y * 0.85, 0) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(190, 160, 95), Enum.PartType.Cylinder)
-		piece(torso, "ScarfTail", Vector3.new(u * 0.45, ts.Y * 1.6, u * 0.08), CFrame.new(u * 0.3, -ts.Y * 0.2, ts.Z * 0.5 + 0.08) * CFrame.Angles(math.rad(12), 0, math.rad(8)), Color3.fromRGB(200, 40, 50))
-	elseif sil == "Tyrant" or sil == "Admiral" then
-		local capeColor = sil == "Tyrant" and Color3.fromRGB(70, 20, 110) or Color3.fromRGB(120, 16, 26)
-		piece(torso, "Cape", Vector3.new(ts.X * 1.15, ts.Y * 2.6, u * 0.08), CFrame.new(0, -ts.Y * 0.75, ts.Z * 0.5 + 0.12) * CFrame.Angles(math.rad(8), 0, 0), capeColor)
-		for _, side in ipairs({ -1, 1 }) do
-			piece(torso, "Collar", Vector3.new(u * 0.12, u * 0.9, u * 0.5), CFrame.new(side * ts.X * 0.28, ts.Y * 0.62, ts.Z * 0.1) * CFrame.Angles(0, 0, math.rad(side * 18)), capeColor:Lerp(Color3.new(1, 1, 1), 0.1))
-		end
-		for _, pair in ipairs({ { lArm, -1 }, { rArm, 1 } }) do
-			local arm, side = pair[1], pair[2]
-			if sil == "Admiral" then
-				piece(arm, "Epaulette", Vector3.new(u * 0.2, u * 1.25, u * 1.25), CFrame.new(side * 0.1, arm.Size.Y * 0.5, 0) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(255, 200, 70), Enum.PartType.Cylinder)
-			else
-				piece(arm, "ShoulderSpike", Vector3.new(u * 0.3, u * 1.1, u * 0.3), CFrame.new(side * 0.2, arm.Size.Y * 0.62, 0) * CFrame.Angles(0, 0, math.rad(-side * 30)), Color3.fromRGB(235, 225, 245))
-			end
-		end
-	elseif sil == "Drone" then
-		for i = 1, 8 do
-			local a = (i / 8) * math.pi * 2
-			piece(head, "Halo", Vector3.new(u * 0.42, u * 0.08, u * 0.14), CFrame.new(math.cos(a) * u * 0.62, hs.Y * 0.95, math.sin(a) * u * 0.62) * CFrame.Angles(0, -a, 0), core, nil, Enum.Material.Neon)
-		end
-		piece(head, "Antenna", Vector3.new(u * 0.06, u * 0.8, u * 0.06), CFrame.new(hs.X * 0.3, hs.Y * 0.7, 0) * CFrame.Angles(0, 0, math.rad(-15)), STEEL)
-		piece(torso, "Pack", Vector3.new(ts.X * 0.7, ts.Y * 0.7, u * 0.5), CFrame.new(0, ts.Y * 0.1, ts.Z * 0.5 + u * 0.22), STEEL)
-	elseif sil == "Mech" then
-		for _, pair in ipairs({ { lArm, -1 }, { rArm, 1 } }) do
-			local plate = shoulder(pair[1], pair[2], Vector3.new(u * 1.35, u * 0.55, u * 1.3), STEEL)
-			piece(plate, "PlateGlow", Vector3.new(u * 1.36, u * 0.08, u * 1.31), CFrame.new(0, -u * 0.18, 0), core, nil, Enum.Material.Neon)
-		end
-		piece(torso, "Pack", Vector3.new(ts.X * 0.85, ts.Y * 0.9, u * 0.6), CFrame.new(0, ts.Y * 0.05, ts.Z * 0.5 + u * 0.28), STEEL)
-		for _, side in ipairs({ -1, 1 }) do
-			piece(torso, "Exhaust", Vector3.new(u * 0.5, u * 0.34, u * 0.34), CFrame.new(side * ts.X * 0.25, -ts.Y * 0.35, ts.Z * 0.5 + u * 0.35) * CFrame.Angles(0, 0, math.rad(90)), core, Enum.PartType.Cylinder, Enum.Material.Neon)
-		end
-	elseif sil == "Shinobi" then
-		for _, side in ipairs({ -1, 1 }) do
-			piece(torso, "ScarfTail", Vector3.new(u * 0.28, ts.Y * 1.9, u * 0.06), CFrame.new(side * u * 0.2, -ts.Y * 0.15, ts.Z * 0.5 + 0.35) * CFrame.Angles(math.rad(35), 0, math.rad(side * 10)), Color3.fromRGB(25, 25, 32))
-		end
-		shoulder(lArm, -1, Vector3.new(u * 1.1, u * 0.45, u * 1.1), STEEL)
-	elseif sil == "Warden" then
-		for _, pair in ipairs({ { lArm, -1 }, { rArm, 1 } }) do
-			local arm, side = pair[1], pair[2]
-			local pylon = piece(arm, "Pylon", Vector3.new(u * 0.36, u * 1.8, u * 0.36), CFrame.new(side * 0.1, arm.Size.Y * 0.5 + u * 0.7, u * 0.1), STEEL)
-			piece(pylon, "PylonTip", Vector3.one * u * 0.36, CFrame.new(0, u * 0.95, 0), core, Enum.PartType.Ball, Enum.Material.Neon)
-		end
-	end
-
-	-- tier dressing
-	local plateColor = STEEL:Lerp(core, 0.12)
-	if level >= 3 then
-		piece(torso, "Plate", Vector3.new(ts.X * 0.86, ts.Y * 0.36, u * 0.12), CFrame.new(0, ts.Y * 0.3, -ts.Z * 0.5 - 0.02), plateColor).Reflectance = 0.15
-		for _, arm in ipairs({ bodyPart(model, "LeftLowerArm", "Left Arm"), bodyPart(model, "RightLowerArm", "Right Arm") }) do
-			if arm then
-				piece(arm, "Plate", Vector3.new(arm.Size.X * 1.15, arm.Size.Y * 0.55, arm.Size.Z * 1.15), CFrame.new(0, 0, 0), plateColor).Reflectance = 0.15
-			end
-		end
-	end
-	if level >= 4 then
-		for _, arm in ipairs({ lArm, rArm }) do
-			piece(arm, "Rune", Vector3.new(0.05, arm.Size.Y * 0.8, 0.12), CFrame.new(arm == lArm and -arm.Size.X * 0.51 or arm.Size.X * 0.51, 0, 0), core, nil, Enum.Material.Neon).Transparency = 0.15
-		end
-		for _, side in ipairs({ -1, 1 }) do
-			piece(torso, "Rune", Vector3.new(0.05, ts.Y * 0.7, 0.1), CFrame.new(side * ts.X * 0.5, -ts.Y * 0.05, -ts.Z * 0.2), core, nil, Enum.Material.Neon).Transparency = 0.15
+		else
+			hp("Bun", Vector3.one * u * 0.56, CFrame.new(0, hs.Y * 0.56, hs.Z * 0.3), Enum.PartType.Ball)
 		end
 	end
 end
 
--- Hand-built classic R6 rig (fallback if the R15 description fails).
+local function headGear(head: BasePart, look)
+	local hs = head.Size
+	local u = math.min(hs.X, hs.Y, hs.Z)
+	local g = look.Gear or {}
+	local trim = look.Trim or WHITE
+	if has(g, "Headband") then
+		piece(head, "Headband", Vector3.new(hs.X * 1.08, u * 0.16, hs.Z * 1.08), CFrame.new(0, hs.Y * 0.2, 0), Color3.fromRGB(34, 44, 90))
+		piece(head, "Plate", Vector3.new(u * 0.46, u * 0.22, u * 0.06), CFrame.new(0, hs.Y * 0.2, -hs.Z * 0.55), Color3.fromRGB(205, 210, 220), nil, Enum.Material.Metal)
+		for _, side in ipairs({ -1, 1 }) do
+			piece(head, "BandTail", Vector3.new(u * 0.12, u * 0.5, u * 0.05), CFrame.new(side * u * 0.12, hs.Y * 0.05, hs.Z * 0.56) * CFrame.Angles(math.rad(25), 0, math.rad(side * 20)), Color3.fromRGB(34, 44, 90))
+		end
+	end
+	if has(g, "Bandana") then
+		piece(head, "Bandana", Vector3.new(hs.X * 1.1, u * 0.3, hs.Z * 1.1), CFrame.new(0, hs.Y * 0.3, 0), trim)
+		piece(head, "Knot", Vector3.one * u * 0.24, CFrame.new(u * 0.2, hs.Y * 0.2, hs.Z * 0.55), trim, Enum.PartType.Ball)
+	end
+	if has(g, "Horns") then
+		for _, side in ipairs({ -1, 1 }) do
+			piece(head, "Horn", Vector3.new(u * 0.2, u * 0.75, u * 0.2), CFrame.new(side * hs.X * 0.33, hs.Y * 0.62, -hs.Z * 0.05) * CFrame.Angles(math.rad(-10), 0, math.rad(-side * 22)), Color3.fromRGB(240, 232, 218))
+		end
+	end
+	if has(g, "Mask") then
+		piece(head, "Mask", Vector3.new(hs.X * 0.98, hs.Y * 0.72, u * 0.12), CFrame.new(0, -hs.Y * 0.06, -hs.Z * 0.48), trim)
+		for _, side in ipairs({ -1, 1 }) do
+			piece(head, "EyeSlit", Vector3.new(u * 0.22, u * 0.05, u * 0.04), CFrame.new(side * hs.X * 0.2, hs.Y * 0.02, -hs.Z * 0.55) * CFrame.Angles(0, 0, math.rad(side * 12)), look.Eye or Color3.fromRGB(255, 60, 60), nil, Enum.Material.Neon)
+		end
+	end
+	if has(g, "HollowMask") then
+		piece(head, "HollowMask", Vector3.new(hs.X * 1.0, hs.Y * 0.8, u * 0.14), CFrame.new(0, -hs.Y * 0.04, -hs.Z * 0.48), WHITE)
+		for _, side in ipairs({ -1, 1 }) do
+			piece(head, "EyeHole", Vector3.new(u * 0.22, u * 0.18, u * 0.05), CFrame.new(side * hs.X * 0.2, hs.Y * 0.02, -hs.Z * 0.56), DARK, Enum.PartType.Ball)
+			piece(head, "Stripe", Vector3.new(u * 0.05, hs.Y * 0.55, u * 0.03), CFrame.new(side * hs.X * 0.36, -hs.Y * 0.05, -hs.Z * 0.555), Color3.fromRGB(190, 30, 40))
+		end
+		piece(head, "Teeth", Vector3.new(u * 0.46, u * 0.08, u * 0.04), CFrame.new(0, -hs.Y * 0.3, -hs.Z * 0.56), DARK)
+	end
+	if has(g, "Blindfold") then
+		piece(head, "Blindfold", Vector3.new(hs.X * 1.08, u * 0.24, hs.Z * 1.08), CFrame.new(0, -hs.Y * 0.02, 0), DARK)
+	end
+	if has(g, "Hood") then
+		piece(head, "Hood", Vector3.new(hs.X * 1.22, hs.Y * 1.05, hs.Z * 1.2), CFrame.new(0, hs.Y * 0.14, u * 0.14), look.Top or DARK, Enum.PartType.Ball)
+	end
+	if has(g, "Crown") then
+		for i = 1, 6 do
+			local a = (i / 6) * math.pi * 2
+			piece(head, "Crown", Vector3.new(u * 0.14, u * 0.4, u * 0.14), CFrame.new(math.cos(a) * u * 0.42, hs.Y * 0.72, math.sin(a) * u * 0.42), Color3.fromRGB(255, 205, 60), nil, Enum.Material.Neon)
+		end
+	end
+	if has(g, "Halo") then
+		piece(head, "Halo", Vector3.new(u * 0.08, u * 1.1, u * 1.1), CFrame.new(0, hs.Y * 0.95, 0) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(255, 240, 150), Enum.PartType.Cylinder, Enum.Material.Neon).Transparency = 0.2
+	end
+	if has(g, "Cap") then
+		piece(head, "Cap", Vector3.new(u * 0.5, hs.X * 1.08, hs.X * 1.08), CFrame.new(0, hs.Y * 0.46, 0) * CFrame.Angles(0, 0, math.rad(90)), trim, Enum.PartType.Cylinder)
+		piece(head, "Visor", Vector3.new(hs.X * 0.8, u * 0.06, u * 0.5), CFrame.new(0, hs.Y * 0.3, -hs.Z * 0.6), DARK)
+	end
+	if has(g, "StrawHat") or has(g, "CowboyHat") then
+		local col = has(g, "StrawHat") and Color3.fromRGB(230, 200, 110) or Color3.fromRGB(150, 90, 50)
+		piece(head, "HatBrim", Vector3.new(u * 0.1, u * 2.6, u * 2.6), CFrame.new(0, hs.Y * 0.5, 0) * CFrame.Angles(0, 0, math.rad(90)), col, Enum.PartType.Cylinder)
+		piece(head, "HatCrown", Vector3.new(u * 0.6, u * 1.25, u * 1.25), CFrame.new(0, hs.Y * 0.72, 0) * CFrame.Angles(0, 0, math.rad(90)), col, Enum.PartType.Cylinder)
+		piece(head, "HatBand", Vector3.new(u * 0.14, u * 1.28, u * 1.28), CFrame.new(0, hs.Y * 0.56, 0) * CFrame.Angles(0, 0, math.rad(90)), Color3.fromRGB(200, 40, 40), Enum.PartType.Cylinder)
+	end
+	if has(g, "Antenna") then
+		for _, side in ipairs({ -1, 1 }) do
+			local a = piece(head, "Antenna", Vector3.new(u * 0.07, u * 0.7, u * 0.07), CFrame.new(side * u * 0.22, hs.Y * 0.72, -u * 0.05) * CFrame.Angles(0, 0, math.rad(-side * 15)), look.Skin or DARK)
+			piece(a, "AntennaTip", Vector3.one * u * 0.14, CFrame.new(0, u * 0.36, 0), look.Skin or DARK, Enum.PartType.Ball)
+		end
+	end
+end
+
+local function outfit(model: Model, look)
+	local up = bodyPart(model, "UpperTorso", "Torso")
+	local low = bodyPart(model, "LowerTorso", "Torso")
+	if not up then
+		return
+	end
+	local ts = up.Size
+	local u = ts.X / 2
+	local top, bottom, trim = look.Top or DARK, look.Bottom or DARK, look.Trim or WHITE
+	local kind = look.Outfit or "Vest"
+	local g = look.Gear or {}
+	local function belt(color)
+		if low then
+			piece(low, "Belt", Vector3.new(low.Size.X * 1.08, u * 0.22, low.Size.Z * 1.1), CFrame.new(0, low.Size.Y * 0.3, 0), color)
+		end
+	end
+	local function skirt(color, len)
+		if low then
+			piece(low, "Skirt", Vector3.new(low.Size.X * 1.18, len, low.Size.Z * 1.25), CFrame.new(0, -len / 2 + low.Size.Y * 0.2, 0), color)
+		end
+	end
+	if kind == "Vest" then
+		piece(up, "Vest", Vector3.new(ts.X * 1.08, ts.Y * 0.95, ts.Z * 1.15), CFrame.new(0, -ts.Y * 0.02, 0), top)
+		piece(up, "Collar", Vector3.new(ts.X * 0.9, u * 0.22, ts.Z * 1.2), CFrame.new(0, ts.Y * 0.46, 0), trim)
+		belt(trim)
+	elseif kind == "Robe" or kind == "Gi" then
+		for _, side in ipairs({ -1, 1 }) do
+			piece(up, "Lapel", Vector3.new(u * 0.26, ts.Y * 0.9, u * 0.05), CFrame.new(side * u * 0.2, ts.Y * 0.02, -ts.Z * 0.52) * CFrame.Angles(0, 0, math.rad(side * 24)), trim)
+		end
+		belt(kind == "Gi" and DARK or trim)
+		if kind == "Robe" then
+			skirt(bottom, u * 1.9)
+		end
+	elseif kind == "Coat" or kind == "Cloak" then
+		piece(up, "CoatBack", Vector3.new(ts.X * 1.12, ts.Y * 2.3, u * 0.12), CFrame.new(0, -ts.Y * 0.62, ts.Z * 0.56), top)
+		for _, side in ipairs({ -1, 1 }) do
+			piece(up, "CoatFront", Vector3.new(u * 0.5, ts.Y * 2.1, u * 0.1), CFrame.new(side * u * 0.55, -ts.Y * 0.55, -ts.Z * 0.56), top)
+		end
+		piece(up, "HighCollar", Vector3.new(ts.X * 1.05, u * 0.5, ts.Z * 1.3), CFrame.new(0, ts.Y * 0.52, 0.05), kind == "Cloak" and top or trim)
+		if kind == "Cloak" then
+			for i = 1, 3 do
+				piece(up, "CloudMark", Vector3.new(u * 0.08, u * 0.34, u * 0.5), CFrame.new(-ts.X * 0.58, -ts.Y * (i * 0.45), 0) * CFrame.Angles(0, 0, 0), trim, Enum.PartType.Ball)
+			end
+		end
+	elseif kind == "Armor" then
+		piece(up, "ChestPlate", Vector3.new(ts.X * 1.1, ts.Y * 0.7, ts.Z * 1.2), CFrame.new(0, ts.Y * 0.1, 0), trim, nil, Enum.Material.Metal).Reflectance = 0.1
+		belt(DARK)
+	elseif kind == "Uniform" then
+		piece(up, "Jacket", Vector3.new(ts.X * 1.06, ts.Y * 0.7, ts.Z * 1.12), CFrame.new(0, ts.Y * 0.14, 0), top)
+		piece(up, "Collar", Vector3.new(ts.X * 0.7, u * 0.2, ts.Z * 1.16), CFrame.new(0, ts.Y * 0.48, 0), trim)
+		for _, side in ipairs({ -1, 1 }) do
+			piece(up, "Strap", Vector3.new(u * 0.1, ts.Y * 1.02, ts.Z * 1.16), CFrame.new(side * u * 0.42, 0, 0), DARK)
+		end
+		belt(DARK)
+	end
+	-- back / neck gear
+	if has(g, "Scarf") then
+		piece(up, "Scarf", Vector3.new(ts.X * 0.95, u * 0.36, ts.Z * 1.3), CFrame.new(0, ts.Y * 0.52, 0), trim)
+		piece(up, "ScarfTail", Vector3.new(u * 0.3, ts.Y * 1.3, u * 0.06), CFrame.new(u * 0.35, -ts.Y * 0.1, ts.Z * 0.6) * CFrame.Angles(math.rad(22), 0, math.rad(10)), trim)
+	end
+	if has(g, "Cape") or has(g, "Haori") then
+		local col = has(g, "Haori") and WHITE or trim
+		piece(up, "Cape", Vector3.new(ts.X * 1.2, ts.Y * 2.4, u * 0.08), CFrame.new(0, -ts.Y * 0.68, ts.Z * 0.62) * CFrame.Angles(math.rad(6), 0, 0), col)
+		if has(g, "Haori") then
+			for _, side in ipairs({ -1, 1 }) do
+				piece(up, "HaoriFront", Vector3.new(u * 0.3, ts.Y * 2.2, u * 0.06), CFrame.new(side * u * 0.78, -ts.Y * 0.6, -ts.Z * 0.6), col)
+			end
+		end
+	end
+	if has(g, "Gourd") then
+		local tan = Color3.fromRGB(205, 170, 120)
+		local gr = piece(up, "Gourd", Vector3.one * u * 1.6, CFrame.new(0, -ts.Y * 0.1, ts.Z * 0.5 + u * 0.7), tan, Enum.PartType.Ball)
+		piece(gr, "GourdTop", Vector3.one * u * 1.0, CFrame.new(-u * 0.3, u * 1.0, 0), tan, Enum.PartType.Ball)
+		piece(up, "GourdStrap", Vector3.new(u * 0.14, ts.Y * 1.3, ts.Z * 1.2), CFrame.new(0, 0, 0) * CFrame.Angles(0, 0, math.rad(40)), Color3.fromRGB(120, 60, 40))
+	end
+	if has(g, "Wings") then
+		for _, side in ipairs({ -1, 1 }) do
+			local w = piece(up, "Wing", Vector3.new(u * 0.1, ts.Y * 1.5, u * 1.4), CFrame.new(side * u * 0.9, ts.Y * 0.3, ts.Z * 0.5 + u * 0.4) * CFrame.Angles(math.rad(-20), side * math.rad(35), side * math.rad(-30)), trim)
+			w.Transparency = 0.1
+		end
+	end
+	if has(g, "Tails") and low then
+		local col = look.Aura or trim
+		for i = 1, 5 do
+			local a = math.rad((i - 3) * 22)
+			local t1 = piece(low, "Tail", Vector3.new(u * 0.45, u * 1.4, u * 0.45), CFrame.new(math.sin(a) * u * 0.6, 0, low.Size.Z * 0.5 + u * 0.4) * CFrame.Angles(math.rad(55), 0, a), col, Enum.PartType.Ball)
+			t1.Material = Enum.Material.Neon
+			t1.Transparency = 0.25
+		end
+	end
+end
+
+local function weapon(model: Model, look)
+	local rh = bodyPart(model, "RightHand", "Right Arm")
+	local lh = bodyPart(model, "LeftHand", "Left Arm")
+	if not rh then
+		return
+	end
+	local u = rh.Size.X
+	local steel = Color3.fromRGB(215, 222, 235)
+	local grip = CFrame.new(0, -rh.Size.Y * 0.4, 0)
+	local kind = look.Weapon or "Fists"
+	local accent = look.Trim or WHITE
+	local glow = look.Aura or look.Eye or accent
+	local function blade(hand: BasePart, len: number, width: number)
+		piece(hand, "Handle", Vector3.new(u * 0.3, u * 1.2, u * 0.3), grip, DARK)
+		piece(hand, "Guard", Vector3.new(u * 1.0, u * 0.14, u * 0.5), grip * CFrame.new(0, 0, -u * 0.7) * CFrame.Angles(math.rad(90), 0, 0), accent)
+		local b = piece(hand, "Blade", Vector3.new(width, u * 0.12, len), grip * CFrame.new(0, 0, -u * 0.7 - len / 2), steel, nil, Enum.Material.Metal)
+		b.Reflectance = 0.2
+		piece(hand, "Edge", Vector3.new(width * 0.3, u * 0.13, len * 0.96), grip * CFrame.new(width * 0.4, 0, -u * 0.7 - len / 2), glow, nil, Enum.Material.Neon)
+	end
+	if kind == "Katana" then
+		blade(rh, u * 4.2, u * 0.35)
+	elseif kind == "Kunai" then
+		blade(rh, u * 1.3, u * 0.4)
+	elseif kind == "Blades" then
+		blade(rh, u * 2.2, u * 0.34)
+		if lh then
+			blade(lh, u * 2.2, u * 0.34)
+		end
+	elseif kind == "Staff" or kind == "Scythe" then
+		local pole = piece(rh, "Pole", Vector3.new(u * 0.25, u * 6, u * 0.25), grip * CFrame.new(0, u * 1.2, 0), Color3.fromRGB(90, 60, 40))
+		if kind == "Staff" then
+			piece(pole, "Orb", Vector3.one * u * 0.9, CFrame.new(0, u * 3.1, 0), glow, Enum.PartType.Ball, Enum.Material.Neon)
+		else
+			piece(pole, "ScytheBlade", Vector3.new(u * 0.12, u * 0.5, u * 3.2), CFrame.new(0, u * 2.9, -u * 1.4), steel, nil, Enum.Material.Metal)
+		end
+	elseif kind == "Club" then
+		local club = piece(rh, "Club", Vector3.new(u * 0.9, u * 3.2, u * 0.9), grip * CFrame.new(0, 0, -u * 1.7) * CFrame.Angles(math.rad(90), 0, 0), Color3.fromRGB(110, 80, 60))
+		for i = 1, 6 do
+			local a = (i / 6) * math.pi * 2
+			piece(club, "Spike", Vector3.one * u * 0.3, CFrame.new(math.cos(a) * u * 0.45, u * 1.1, math.sin(a) * u * 0.45), steel)
+		end
+	elseif kind == "Gun" then
+		piece(rh, "Gun", Vector3.new(u * 0.4, u * 0.55, u * 1.3), grip * CFrame.new(0, 0, -u * 0.5), DARK, nil, Enum.Material.Metal)
+	elseif kind == "Bow" then
+		for k = -2, 2 do
+			piece(lh or rh, "Bow", Vector3.new(u * 0.16, u * 0.9, u * 0.16), CFrame.new(0, -u * 0.4 + k * u * 0.75, -u * 0.3 - math.abs(k) * -u * 0.12) * CFrame.Angles(math.rad(-k * 14), 0, 0), accent)
+		end
+	elseif kind == "Fan" then
+		piece(rh, "Fan", Vector3.new(u * 0.1, u * 2.6, u * 2.6), grip * CFrame.new(0, u * 0.6, -u * 0.6) * CFrame.Angles(0, math.rad(90), 0), accent, Enum.PartType.Cylinder)
+	else -- Fists: wrapped hands
+		for _, hnd in ipairs({ rh, lh }) do
+			if hnd then
+				piece(hnd, "Wrap", Vector3.new(hnd.Size.X * 1.12, hnd.Size.Y * 0.6, hnd.Size.Z * 1.12), CFrame.new(0, hnd.Size.Y * 0.1, 0), accent)
+			end
+		end
+	end
+end
+
+-- Chibi anime figure for an archetype (R15 from a HumanoidDescription).
+local function buildChibi(look, desc: HumanoidDescription?): Model
+	local skin = look.Skin or Color3.fromRGB(245, 208, 178)
+	local sleeves = look.Outfit ~= "Vest" and look.Outfit ~= "Bare"
+	desc = desc or Instance.new("HumanoidDescription")
+	local d = desc :: HumanoidDescription
+	d.HeadColor = skin
+	d.TorsoColor = look.Outfit == "Bare" and skin or (look.Top or skin)
+	d.LeftArmColor = sleeves and (look.Top or skin) or skin
+	d.RightArmColor = d.LeftArmColor
+	d.LeftLegColor = look.Outfit == "Bare" and skin or (look.Bottom or skin)
+	d.RightLegColor = d.LeftLegColor
+	d.HeightScale = 0.85
+	d.WidthScale = 1
+	d.DepthScale = 1
+	d.HeadScale = 1
+	d.BodyTypeScale = 0
+	d.ProportionScale = 0
+	local ok, model = pcall(function()
+		return Players:CreateHumanoidModelFromDescriptionAsync(d, Enum.HumanoidRigType.R15)
+	end)
+	if not ok or not model then
+		return nil :: any
+	end
+	for _, x in ipairs(model:GetDescendants()) do
+		if x:IsA("Script") or x:IsA("LocalScript") then
+			x:Destroy()
+		elseif x:IsA("BasePart") and x.Name ~= "HumanoidRootPart" then
+			x.Material = Enum.Material.SmoothPlastic
+			x.Reflectance = 0
+			if x.Name == "LeftHand" or x.Name == "RightHand" then
+				x.Color = skin
+			end
+		end
+	end
+	chibify(model)
+	local head = model:FindFirstChild("Head") :: BasePart?
+	if head then
+		buildFace(head, look)
+		hair(head, look)
+		headGear(head, look)
+	end
+	outfit(model, look)
+	weapon(model, look)
+	return model
+end
+
+-- Optional: dress the rig from the catalog (Config.EnemyModelStyle = "Catalog").
+local catalogCache = {}
+local function catalogIds(keyword: string?, assetType: Enum.AvatarAssetType): { number }
+	if not keyword or keyword == "" then
+		return {}
+	end
+	local key = keyword .. "|" .. assetType.Name
+	if catalogCache[key] then
+		return catalogCache[key]
+	end
+	local ids = {}
+	pcall(function()
+		local params = CatalogSearchParams.new()
+		params.SearchKeyword = keyword
+		params.AssetTypes = { assetType }
+		params.IncludeOffSale = true
+		params.Limit = 30
+		for _, item in ipairs(AvatarEditorService:SearchCatalogAsync(params):GetCurrentPage()) do
+			local id = type(item) == "table" and tonumber(item.Id)
+			if id then
+				table.insert(ids, id)
+			end
+		end
+	end)
+	catalogCache[key] = ids
+	return ids
+end
+
+local function catalogDescription(lookId: string): HumanoidDescription?
+	local userId = Config.EnemyAvatarUserIds[lookId]
+	if userId then
+		local ok, desc = pcall(function()
+			return Players:GetHumanoidDescriptionFromUserIdAsync(userId)
+		end)
+		if ok and desc then
+			return desc
+		end
+	end
+	local kw = Config.EnemyAvatarKeywords[lookId]
+	if not kw then
+		return nil
+	end
+	local desc = Instance.new("HumanoidDescription")
+	local hairIds = catalogIds(kw.Hair, Enum.AvatarAssetType.HairAccessory)
+	if #hairIds > 0 then
+		desc.HairAccessory = tostring(hairIds[1])
+	end
+	local hatIds = catalogIds(kw.Hat, Enum.AvatarAssetType.Hat)
+	if #hatIds > 0 then
+		desc.HatAccessory = tostring(hatIds[1])
+	end
+	local shirts = catalogIds(kw.Shirt, Enum.AvatarAssetType.Shirt)
+	if #shirts > 0 then
+		desc.Shirt = shirts[1]
+	end
+	local pants = catalogIds(kw.Pants, Enum.AvatarAssetType.Pants)
+	if #pants > 0 then
+		desc.Pants = pants[1]
+	end
+	return desc
+end
+
+local FALLBACK_LOOK = { Skin = Color3.fromRGB(245, 208, 178), Hair = "Spiky", HairColor = DARK, Eye = Color3.fromRGB(255, 60, 60), Top = Color3.fromRGB(60, 60, 80), Bottom = DARK, Outfit = "Vest", Gear = { "Headband" }, Weapon = "Kunai" }
+
+-- Hand-built R6 rig (last-resort fallback if R15 creation fails).
 local function buildR6(look): Model
 	local m = Instance.new("Model")
 	local function p(name, size, color)
@@ -315,22 +554,18 @@ local function buildR6(look): Model
 		part.Parent = m
 		return part
 	end
-	local root = p("HumanoidRootPart", Vector3.new(2, 2, 1), look.Shirt)
+	local root = p("HumanoidRootPart", Vector3.new(2, 2, 1), look.Top)
 	root.Transparency = 1
-	local torso = p("Torso", Vector3.new(2, 2, 1), look.Shirt)
-	local head = p("Head", Vector3.new(2, 1, 1), look.Skin)
+	local torso = p("Torso", Vector3.new(2, 2, 1), look.Top)
+	local head = p("Head", Vector3.new(2, 1, 1) * 1.5, look.Skin)
 	local mesh = Instance.new("SpecialMesh")
 	mesh.MeshType = Enum.MeshType.Head
 	mesh.Scale = Vector3.new(1.25, 1.25, 1.25)
 	mesh.Parent = head
-	local face = Instance.new("Decal")
-	face.Name = "face"
-	face.Texture = "rbxasset://textures/face.png"
-	face.Parent = head
 	local la = p("Left Arm", Vector3.new(1, 2, 1), look.Skin)
 	local ra = p("Right Arm", Vector3.new(1, 2, 1), look.Skin)
-	local ll = p("Left Leg", Vector3.new(1, 2, 1), look.Pants)
-	local rl = p("Right Leg", Vector3.new(1, 2, 1), look.Pants)
+	local ll = p("Left Leg", Vector3.new(1, 2, 1), look.Bottom)
+	local rl = p("Right Leg", Vector3.new(1, 2, 1), look.Bottom)
 	local function motor(name, p0, p1, c0, c1)
 		local mo = Instance.new("Motor6D")
 		mo.Name = name
@@ -342,7 +577,7 @@ local function buildR6(look): Model
 	end
 	local rj = CFrame.Angles(math.rad(-90), 0, math.rad(180))
 	motor("RootJoint", root, torso, rj, rj)
-	motor("Neck", torso, head, CFrame.new(0, 1, 0) * rj, CFrame.new(0, -0.5, 0) * rj)
+	motor("Neck", torso, head, CFrame.new(0, 1, 0) * rj, CFrame.new(0, -0.75, 0) * rj)
 	motor("Right Shoulder", torso, ra, CFrame.new(1, 0.5, 0) * CFrame.Angles(0, math.rad(90), 0), CFrame.new(-0.5, 0.5, 0) * CFrame.Angles(0, math.rad(90), 0))
 	motor("Left Shoulder", torso, la, CFrame.new(-1, 0.5, 0) * CFrame.Angles(0, math.rad(-90), 0), CFrame.new(0.5, 0.5, 0) * CFrame.Angles(0, math.rad(-90), 0))
 	motor("Right Hip", torso, rl, CFrame.new(1, -1, 0) * CFrame.Angles(0, math.rad(90), 0), CFrame.new(0.5, 1, 0) * CFrame.Angles(0, math.rad(90), 0))
@@ -353,134 +588,39 @@ local function buildR6(look): Model
 	m.PrimaryPart = root
 	root.CFrame = CFrame.new(0, 3, 0)
 	torso.CFrame = root.CFrame
-	head.CFrame = root.CFrame * CFrame.new(0, 1.5, 0)
+	head.CFrame = root.CFrame * CFrame.new(0, 1.75, 0)
 	ra.CFrame = root.CFrame * CFrame.new(1.5, 0, 0)
 	la.CFrame = root.CFrame * CFrame.new(-1.5, 0, 0)
 	rl.CFrame = root.CFrame * CFrame.new(0.5, -2, 0)
 	ll.CFrame = root.CFrame * CFrame.new(-0.5, -2, 0)
+	buildFace(head, look)
+	hair(head, look)
+	headGear(head, look)
 	return m
 end
 
--- Catalog search (cached): keyword -> list of asset ids.
-local catalogCache = {}
-local function catalogIds(keyword: string?, assetType: Enum.AvatarAssetType): { number }
-	if not keyword or keyword == "" then
-		return {}
-	end
-	local key = keyword .. "|" .. assetType.Name
-	if catalogCache[key] then
-		return catalogCache[key]
-	end
-	local ids = {}
-	local ok, err = pcall(function()
-		local params = CatalogSearchParams.new()
-		params.SearchKeyword = keyword
-		params.AssetTypes = { assetType }
-		params.IncludeOffSale = true
-		params.Limit = 30
-		local pages = AvatarEditorService:SearchCatalogAsync(params)
-		for _, item in ipairs(pages:GetCurrentPage()) do
-			local id = type(item) == "table" and tonumber(item.Id)
-			if id then
-				table.insert(ids, id)
+local function buildTemplate(lookId: string): Model
+	local look = Config.EnemyArchetypes[lookId] or FALLBACK_LOOK
+	local model = nil
+	if Config.EnemyModelStyle == "Catalog" then
+		local desc = catalogDescription(lookId)
+		if desc then
+			local ok, m = pcall(function()
+				return Players:CreateHumanoidModelFromDescriptionAsync(desc, Enum.HumanoidRigType.R15)
+			end)
+			if ok and m then
+				model = m
+				chibify(model)
 			end
 		end
-	end)
-	if not ok then
-		warn("[Enemies] catalog search failed for '" .. keyword .. "':", err)
 	end
-	catalogCache[key] = ids
-	return ids
-end
-
-local function pick(ids: { number }, seed: number): number?
-	if #ids == 0 then
-		return nil
-	end
-	return ids[(seed * 7) % #ids + 1]
-end
-
--- Builds a HumanoidDescription from the catalog for a stage. Returns the
--- description and whether real catalog items were found.
-local function catalogDescription(stageIndex: number)
-	local userId = Config.EnemyAvatarUserIds[stageIndex]
-	if userId then
-		local ok, desc = pcall(function()
-			return Players:GetHumanoidDescriptionFromUserIdAsync(userId)
-		end)
-		if ok and desc then
-			return desc, true
-		end
-	end
-	local avatar = Config.EnemyAvatars[stageIndex] or Config.EnemyAvatars[1]
-	local override = Config.EnemyCatalogOverrides[stageIndex] or {}
-	local desc = Instance.new("HumanoidDescription")
-	local skin = avatar.Skin
-	desc.HeadColor, desc.TorsoColor, desc.LeftArmColor, desc.RightArmColor, desc.LeftLegColor, desc.RightLegColor = skin, skin, skin, skin, skin, skin
-	local found = false
-	local hair = override.HairAccessory or pick(catalogIds(avatar.Hair, Enum.AvatarAssetType.HairAccessory), stageIndex)
-	if hair and hair ~= "" then
-		desc.HairAccessory = tostring(hair)
-		found = true
-	end
-	local hat = override.HatAccessory or pick(catalogIds(avatar.Hat, Enum.AvatarAssetType.Hat), stageIndex)
-	if hat and hat ~= "" then
-		desc.HatAccessory = tostring(hat)
-	else
-		local face = override.FaceAccessory or pick(catalogIds(avatar.Hat, Enum.AvatarAssetType.FaceAccessory), stageIndex)
-		if face and face ~= "" then
-			desc.FaceAccessory = tostring(face)
-		end
-	end
-	local shirt = override.Shirt or pick(catalogIds(avatar.Shirt, Enum.AvatarAssetType.Shirt), stageIndex)
-	if shirt and shirt ~= 0 then
-		desc.Shirt = shirt
-		found = true
-	end
-	local pants = override.Pants or pick(catalogIds(avatar.Pants, Enum.AvatarAssetType.Pants), stageIndex)
-	if pants and pants ~= 0 then
-		desc.Pants = pants
-	end
-	if override.Face and override.Face ~= 0 then
-		desc.Face = override.Face
-	end
-	return desc, found
-end
-
-local function buildTemplate(stageIndex: number): Model
-	local look = Config.EnemyLooks[((stageIndex - 1) % #Config.EnemyLooks) + 1]
-	local desc, catalogLook = catalogDescription(stageIndex)
-	if not catalogLook then
-		desc.HeadColor = look.Skin
-		desc.TorsoColor = look.Shirt
-		desc.LeftArmColor = look.Shirt
-		desc.RightArmColor = look.Shirt
-		desc.LeftLegColor = look.Pants
-		desc.RightLegColor = look.Pants
-	end
-	local ok, model = pcall(function()
-		return Players:CreateHumanoidModelFromDescriptionAsync(desc, Enum.HumanoidRigType.R15)
-	end)
-	if not ok or not model then
-		warn("[Enemies] R15 rig build failed, using R6 fallback:", model)
+	model = model or buildChibi(look)
+	if not model then
+		warn("[Enemies] R15 rig build failed for " .. tostring(lookId) .. ", using R6 fallback")
 		model = buildR6(look)
-		catalogLook = false
 	end
-	for _, d in ipairs(model:GetDescendants()) do
-		if d:IsA("Script") or d:IsA("LocalScript") then
-			d:Destroy()
-		elseif not catalogLook and d:IsA("BasePart") and (d.Name == "LeftHand" or d.Name == "RightHand") then
-			d.Color = look.Skin
-		end
-	end
-	if not catalogLook then
-		decorate(model, look)
-	end
-	local stage = Config.Stages[stageIndex]
-	local level = stage and (stage.Boss and Config.StagesPerZone or ((stageIndex - 1) % Config.StagesPerZone) + 1) or 3
-	local coreColor = stage and stage.Color or look.Core
-	stylize(model, { Core = coreColor, Silhouette = look.Silhouette }, level, catalogLook)
-	model:SetAttribute("CoreColor", coreColor)
+	model:SetAttribute("CoreColor", look.Aura or look.Eye or Color3.fromRGB(255, 80, 80))
+	model:SetAttribute("Archetype", lookId)
 	return model
 end
 
@@ -564,8 +704,8 @@ end
 
 -- Elite variant: clothes pulled toward a dark tone, every glowing accent,
 -- plate and rune switched to gold.
-local GLOW_PARTS = { Eye = true, Core = true, Rune = true, PylonTip = true, PlateGlow = true, Halo = true, Exhaust = true }
-local ARMOR_PARTS = { Plate = true, Pauldron = true, CoreRing = true }
+local GLOW_PARTS = { Iris = true, Edge = true, Orb = true, EyeSlit = true, Halo = true, Crown = true, Tail = true }
+local ARMOR_PARTS = { ChestPlate = true, Plate = true, Guard = true, Belt = true }
 local function applyElitePalette(model: Model)
 	local E = Config.EliteLook
 	for _, d in ipairs(model:GetDescendants()) do
@@ -580,7 +720,7 @@ local function applyElitePalette(model: Model)
 			elseif ARMOR_PARTS[name] then
 				d.Color = E.Trim:Lerp(Color3.new(0, 0, 0), 0.35)
 				d.Reflectance = 0.25
-			elseif name ~= "Head" and name:find("Hand") == nil then
+			elseif name ~= "Head" and name:find("Hand") == nil and name ~= "EyeWhite" and name ~= "Shine" and name ~= "Pupil" then
 				d.Color = d.Color:Lerp(E.Palette, 0.55)
 			end
 		end
@@ -606,22 +746,25 @@ local function tierKey(e): string
 end
 
 local building = {}
-local function templateFor(stageIndex: number): Model
-	while building[stageIndex] do
+local function templateFor(lookId: string): Model
+	while building[lookId] do
 		task.wait(0.1)
 	end
-	local template = templates[stageIndex]
+	local template = templates[lookId]
 	if not template then
-		building[stageIndex] = true
-		template = buildTemplate(stageIndex)
-		templates[stageIndex] = template
-		building[stageIndex] = nil
+		building[lookId] = true
+		template = buildTemplate(lookId)
+		templates[lookId] = template
+		building[lookId] = nil
 	end
 	return template
 end
+EnemyService.Prebuild = function(lookId: string)
+	task.spawn(templateFor, lookId)
+end
 
 function EnemyService.Create(opts)
-	local template = templateFor(opts.LookIndex or 1)
+	local template = templateFor(opts.Look or "RogueGenin")
 	local model = template:Clone()
 	model.Name = opts.Label
 	if opts.Elite then
@@ -694,7 +837,8 @@ function EnemyService.Create(opts)
 		Color = color,
 		Boss = opts.Boss,
 		Elite = opts.Elite,
-		StageIndex = opts.StageIndex,
+		FloorData = opts.Floor,
+		OnKilled = opts.OnKilled,
 		Owner = opts.Owner,
 		Min = opts.Min,
 		Max = opts.Max,
@@ -743,61 +887,11 @@ function EnemyService.Create(opts)
 	return enemy
 end
 
-local stageState = {} -- [stageIndex] = { Active, LastNear, Enemies = {} }
-
-local function spawnForStage(stageIndex: number, announce: boolean?)
-	local stage = Config.Stages[stageIndex]
-	local info = map.Path and map.Path.Stages[stageIndex]
-	local st = stageState[stageIndex]
-	if not info or not st or not st.Active then
-		return
-	end
-	local elite = not stage.Boss and math.random() < Config.EliteChance
-	local scale = stage.Boss and 2.6 or (elite and 1.3 or 1)
-	local pos = stage.Boss and info.Center or randomPoint(info.SpawnMin, info.SpawnMax)
-	local enemy = EnemyService.Create({
-		Label = (elite and "ELITE " or "") .. stage.Enemy,
-		LookIndex = stageIndex,
-		Color = stage.Color,
-		Scale = scale,
-		HP = stage.HP * (elite and Config.EliteHPMult or 1),
-		Boss = stage.Boss,
-		Elite = elite,
-		StageIndex = stageIndex,
-		Position = pos,
-		Min = info.SpawnMin,
-		Max = info.SpawnMax,
-		Speed = stage.Boss and 13 or (elite and 15 or 12),
-	})
-	if not st.Active then
-		-- the stage went to sleep while the rig was building
-		enemy.Dead = true
-		local idx = table.find(EnemyService.Active, enemy)
-		if idx then
-			table.remove(EnemyService.Active, idx)
-		end
-		enemy.Model:Destroy()
-		return nil
-	end
-	st.Enemies[enemy] = true
-	if stage.Boss and announce then
-		Net.FXAll("BossSpawn", { Name = stage.Enemy, Stage = stageIndex, Zone = stage.Zone, Pos = pos, Color = stage.Color })
-	end
-	return enemy
-end
-
 ---------------------------------------------------------------------
 -- QUERIES
 ---------------------------------------------------------------------
 function EnemyService.CanDamage(player: Player, e): boolean
-	if e.Dead or (e.Owner and e.Owner ~= player) then
-		return false
-	end
-	if e.StageIndex then
-		local data = DataService.Get(player)
-		return data ~= nil and Stats.StageUnlocked(data, e.StageIndex)
-	end
-	return true
+	return not e.Dead and (not e.Owner or e.Owner == player)
 end
 
 function EnemyService.InSphere(pos: Vector3, radius: number)
@@ -1021,30 +1115,13 @@ local function gearDrop(player: Player, chance: number)
 	end
 end
 
--- Kills in your next locked-in stage count toward opening its gate.
-local function stageProgress(player: Player, data, enemy)
-	local stageIndex = enemy.StageIndex
-	if not stageIndex or enemy.Owner or stageIndex ~= data.Stage + 1 then
-		return
-	end
-	local stage = Config.Stages[stageIndex]
-	data.StageKills += 1
-	if data.StageKills >= stage.Kills then
-		data.Stage = stageIndex
-		data.StageKills = 0
-		Net.FX(player, "StageCleared", { Stage = stageIndex, Boss = stage.Boss, Name = stage.Enemy })
-	else
-		Net.FX(player, "StageKill", { Stage = stageIndex, Kills = data.StageKills, Need = stage.Kills })
-	end
-end
-
 local function reward(player: Player, enemy)
 	local data = DataService.Get(player)
 	local s = DataService.Session(player)
 	if not data or not s then
 		return
 	end
-	local stage = Config.Stages[enemy.StageIndex]
+	local stage = enemy.FloorData
 	if not stage then
 		return
 	end
@@ -1052,7 +1129,9 @@ local function reward(player: Player, enemy)
 	local coins = math.floor(stage.Coins * mult * Stats.CoinMult(player))
 	data.Coins += coins
 	data.Kills += 1
-	stageProgress(player, data, enemy)
+	if EnemyService.OnReward then
+		EnemyService.OnReward(player, enemy)
+	end
 	local luck = Stats.Luck(player) * (enemy.Elite and 2 or 1)
 	local count
 	if enemy.Boss then
@@ -1107,6 +1186,9 @@ function EnemyService.Kill(enemy, killer: Player?)
 			end
 		end
 	end
+	if enemy.OnKilled then
+		task.spawn(enemy.OnKilled, killer)
+	end
 	EnemyService.Ragdoll(enemy, 1, true)
 	task.delay(0.9, function()
 		local idx = table.find(EnemyService.Active, enemy)
@@ -1115,23 +1197,6 @@ function EnemyService.Kill(enemy, killer: Player?)
 		end
 		enemy.Model:Destroy()
 	end)
-	if enemy.StageIndex and not enemy.Owner then
-		local st = stageState[enemy.StageIndex]
-		if st then
-			st.Enemies[enemy] = nil
-		end
-		local stage = Config.Stages[enemy.StageIndex]
-		task.delay(stage.Boss and Config.BossRespawn or Config.EnemyRespawn, function()
-			local s2 = stageState[enemy.StageIndex]
-			local alive = 0
-			for _ in pairs(s2 and s2.Enemies or {}) do
-				alive += 1
-			end
-			if s2 and s2.Active and alive < stage.Count then
-				spawnForStage(enemy.StageIndex, true)
-			end
-		end)
-	end
 end
 
 function EnemyService.Damage(enemy, player: Player, amount: number, crit: boolean?)
@@ -1274,7 +1339,7 @@ local function basicAttack(e, target)
 			track:AdjustSpeed(1.5) -- snap into the strike
 		end
 		setPose(e, "Strike", 0.15)
-		Net.FXAll("EnemySwipe", { Pos = e.Root.Position, Target = target.Root.Position, Color = e.Color })
+		Net.FXAll("EnemySwipe", { Pos = e.Root.Position, Target = target.Root.Position, Color = e.Color, Model = e.Model })
 		waitForHit(track, Config.EnemyAnims.BasicHitTime / 1.5)
 		if not e.Dead and not e.Ragdolled and os.clock() >= e.StunnedUntil and target.Root.Parent then
 			local reach = Config.EnemyAttackRange + e.Radius
@@ -1425,79 +1490,39 @@ local function stepAI()
 	end
 end
 
--- Wake a stage when a player is within its bounds (+ a margin) and put it
--- to sleep after Config.StageSleepTime with nobody near. Keeps the server
--- light even with 30 stages of humanoid enemies.
-local function stageNear(stageIndex: number, roots): boolean
-	local zStart, zEnd = Config.StageBounds(stageIndex)
-	for _, pr in ipairs(roots) do
-		local p = pr.Root.Position
-		if math.abs(p.X) < 150 and p.Z <= zStart + 70 and p.Z >= zEnd - 70 and p.Y < 200 then
-			return true
-		end
-	end
-	return false
-end
-
-local function wake(stageIndex: number)
-	local st = stageState[stageIndex]
-	st.Active = true
-	local stage = Config.Stages[stageIndex]
-	for _ = 1, stage.Count do
-		task.spawn(spawnForStage, stageIndex, false)
-	end
-end
-
-local function sleep(stageIndex: number)
-	local st = stageState[stageIndex]
-	st.Active = false
-	for enemy in pairs(st.Enemies) do
-		enemy.Dead = true
-		local idx = table.find(EnemyService.Active, enemy)
-		if idx then
-			table.remove(EnemyService.Active, idx)
-		end
-		enemy.Model:Destroy()
-	end
-	table.clear(st.Enemies)
-end
-
--- Clears every living enemy (admin); stages refill when players are near.
+-- Clears every living enemy (admin). Owned enemies credit their owner.
 function EnemyService.KillAll(byPlayer: Player?)
 	for _, e in ipairs(table.clone(EnemyService.Active)) do
-		if not e.Dead and not e.Owner then
-			EnemyService.Kill(e, byPlayer)
+		if not e.Dead then
+			EnemyService.Kill(e, e.Owner or byPlayer)
 		end
+	end
+end
+
+-- Removes an enemy without rewards (run ended, room reset...).
+function EnemyService.Despawn(e)
+	if e.Dead then
+		return
+	end
+	e.Dead = true
+	local idx = table.find(EnemyService.Active, e)
+	if idx then
+		table.remove(EnemyService.Active, idx)
+	end
+	if e.Model then
+		e.Model:Destroy()
 	end
 end
 
 function EnemyService.Init(m)
 	map = m
-	for i in ipairs(Config.Stages) do
-		stageState[i] = { Active = false, LastNear = 0, Enemies = {} }
-	end
-	-- pre-build the first few rigs (catalog lookups yield)
+	-- pre-build the first zone's rigs so the first rooms spawn instantly
 	task.spawn(function()
-		for i = 1, math.min(3, #Config.Stages) do
-			templateFor(i)
+		local z = Config.Zones[1]
+		for _, id in ipairs(z.Enemies) do
+			templateFor(id)
 		end
-	end)
-	task.spawn(function()
-		while true do
-			task.wait(1)
-			local roots = playerRoots()
-			local t = os.clock()
-			for i, st in ipairs(stageState) do
-				if stageNear(i, roots) then
-					st.LastNear = t
-					if not st.Active then
-						wake(i)
-					end
-				elseif st.Active and t - st.LastNear > Config.StageSleepTime then
-					sleep(i)
-				end
-			end
-		end
+		templateFor(z.Bosses[1])
 	end)
 	task.spawn(function()
 		while true do

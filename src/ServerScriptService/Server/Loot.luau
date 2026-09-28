@@ -51,15 +51,28 @@ end
 ---------------------------------------------------------------------
 -- INDEX (first-time discovery rewards)
 ---------------------------------------------------------------------
+-- Picking up a new ore only *finds* it; the player unlocks it in the Index
+-- (click the card) to reveal it and claim the coin reward.
 local function discover(player: Player, data, oreId: string)
-	if data.Index[oreId] then
+	if data.Index[oreId] or data.IndexFound[oreId] then
+		return
+	end
+	data.IndexFound[oreId] = true
+	local ore = Config.OreById[oreId]
+	Net.FX(player, "Discover", { Ore = oreId, Reward = Config.IndexReward[ore.Rarity] or 0 })
+end
+
+function Loot.UnlockIndex(player: Player, oreId)
+	local data = DataService.Get(player)
+	local ore = type(oreId) == "string" and Config.OreById[oreId]
+	if not data or not ore or data.Index[oreId] or not data.IndexFound[oreId] then
 		return
 	end
 	data.Index[oreId] = true
-	local ore = Config.OreById[oreId]
 	local reward = Config.IndexReward[ore.Rarity] or 0
 	data.Coins += reward
-	Net.FX(player, "Discover", { Ore = oreId, Reward = reward })
+	Net.FX(player, "IndexUnlocked", { Ore = oreId, Reward = reward })
+	DataService.MarkDirty(player)
 end
 
 ---------------------------------------------------------------------

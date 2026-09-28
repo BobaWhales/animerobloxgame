@@ -35,9 +35,9 @@ Config.Events = {
 -- FONTS  (one place to restyle every label in the game)
 ---------------------------------------------------------------------
 Config.Fonts = {
-	Display = Enum.Font.Bangers, -- titles, big numbers, buttons (manga sound-effect look)
-	Heading = Enum.Font.Sarpanch, -- small caps / labels / key caps
-	Body = Enum.Font.Oswald, -- readable body text
+	Display = Enum.Font.FredokaOne, -- titles, big numbers, buttons
+	Heading = Enum.Font.FredokaOne, -- small labels / key caps
+	Body = Enum.Font.FredokaOne, -- body text
 }
 
 ---------------------------------------------------------------------
@@ -148,43 +148,93 @@ end
 Config.IndexReward = { Common = 25, Uncommon = 150, Rare = 800, Epic = 5000, Legendary = 40000, Mythic = 300000, Rift = 3000000 }
 
 ---------------------------------------------------------------------
--- THE PATH  (stages in a line; kill enough enemies to open the next gate,
--- a boss guards every 5th stage)
+-- THE DUNGEON  (+1 Loot To Forge style runs)
+-- Enter from the lobby and fight floor after floor: clear a room to open
+-- the next door, a boss guards every 5th floor. Dying or going HOME sends
+-- you back to the lobby and the run starts over, but checkpoints let you
+-- skip ahead: reach floor 50 to start at 25, floor 75 to start at 50...
+-- Floors never end; zones cycle with a "Nightmare" tier after floor 200.
 ---------------------------------------------------------------------
-Config.Zones = {
-	{ Id = 1, Name = "Verdant Academy Ruins", Floor = Color3.fromRGB(58, 72, 52), Wall = Color3.fromRGB(96, 92, 86), Accent = Color3.fromRGB(120, 255, 150), Tint = Color3.fromRGB(225, 245, 225) },
-	{ Id = 2, Name = "Neon Mecha Docks", Floor = Color3.fromRGB(26, 28, 40), Wall = Color3.fromRGB(44, 48, 68), Accent = Color3.fromRGB(0, 230, 255), Tint = Color3.fromRGB(215, 230, 255) },
-	{ Id = 3, Name = "Sakura Underworld", Floor = Color3.fromRGB(56, 34, 46), Wall = Color3.fromRGB(80, 48, 62), Accent = Color3.fromRGB(255, 120, 190), Tint = Color3.fromRGB(255, 225, 240) },
-	{ Id = 4, Name = "Starlit Battlefront", Floor = Color3.fromRGB(30, 26, 52), Wall = Color3.fromRGB(52, 44, 84), Accent = Color3.fromRGB(150, 120, 255), Tint = Color3.fromRGB(225, 220, 255) },
-	{ Id = 5, Name = "Frostfang Peaks", Floor = Color3.fromRGB(72, 86, 100), Wall = Color3.fromRGB(110, 128, 146), Accent = Color3.fromRGB(150, 225, 255), Tint = Color3.fromRGB(225, 240, 255) },
-	{ Id = 6, Name = "The Rift Throne", Floor = Color3.fromRGB(22, 18, 26), Wall = Color3.fromRGB(40, 30, 44), Accent = Color3.fromRGB(0, 255, 225), Tint = Color3.fromRGB(230, 220, 235) },
-}
-Config.StagesPerZone = 5
-
-local STAGE_NAMES = {
-	{ "Slime Delinquent", "Hall Monitor Oni", "Club Captain Golem", "Rooftop Ronin", "Student Council Tyrant" },
-	{ "Scrap Drone", "Dockside Mech-Grunt", "Neon Ninja Unit", "Plasma Warden", "Mecha Admiral Kaizer" },
-	{ "Lantern Wisp", "Kitsune Trickster", "Blossom Samurai", "Petal Witch", "Sakura Demon Queen" },
-	{ "Star Cadet", "Comet Knight", "Nebula Sniper", "Void Paladin", "General Starfall" },
-	{ "Frost Yeti", "Ice Monk", "Blizzard Ronin", "Glacier Titan", "Frost Emperor Yuki" },
-	{ "Rift Stalker", "Chaos Acolyte", "Abyss Knight", "Rift Warlord", "The Rift King" },
-}
-
--- Exponential curves. Stage i: HP = 30 * 1.9^(i-1), Coins = 3 * 1.75^(i-1).
-Config.PathCurve = {
+local cc = Color3.fromRGB
+Config.Dungeon = {
+	FloorsPerZone = 25,
+	BossEvery = 5,
+	CheckpointEvery = 25, -- a checkpoint at floor N unlocks once you reach N + CheckpointEvery
+	FastTravelEvery = 10, -- Fast Travel gamepass: checkpoints every 10 floors (still one step behind)
+	RoomWidth = 64,
+	RoomLen = 78,
+	BossRoomLen = 110,
+	HallLen = 34, -- entry hall at the start of each 5-floor segment
+	SpawnRange = 10, -- enemies spawn once you walk this far into a room
 	BaseHP = 30,
-	HPGrowth = 1.9,
+	HPGrowth = 1.22, -- per floor
 	BaseCoins = 3,
-	CoinGrowth = 1.75,
-	BossHPMult = 30,
-	BossCoinMult = 20,
-	KillsToAdvance = 8,
-	SpawnCount = 6,
+	CoinGrowth = 1.17, -- per floor
+	BossHPMult = 14,
+	BossCoinMult = 15,
+	BaseCount = 4, -- enemies per room (grows slowly)
+	MaxCount = 8,
+	RunSlots = 24,
+	SlotSpacing = 900,
+	SlotOrigin = Vector3.new(-8000, 600, 0),
 }
 
--- Which ores a stage can drop: the newest ore is always the rarest drop.
-local function stageDrops(i: number, boss: boolean)
-	local maxOrder = math.min(#Config.Ores, 2 + math.ceil(i * 0.7) + (boss and 1 or 0))
+-- Anime-themed zones (parody names), 25 floors each.
+Config.Zones = {
+	{
+		Id = 1, Name = "Hidden Leaf Forest", Theme = "Forest",
+		Floor = cc(58, 74, 46), Wall = cc(92, 72, 52), Accent = cc(120, 255, 150), Tint = cc(225, 245, 225),
+		Enemies = { "RogueGenin", "SoundNinja", "PuppetNinja", "MaskedAnbu" },
+		Bosses = { "SandGourd", "SnakeSage", "RedCloudRogue", "ShadowAvenger", "NineTailsHost" },
+	},
+	{
+		Id = 2, Name = "Soul Reaper Gates", Theme = "Soul",
+		Floor = cc(40, 38, 46), Wall = cc(210, 205, 196), Accent = cc(120, 200, 255), Tint = cc(225, 232, 255),
+		Enemies = { "Hollow", "RogueReaper", "Arrancar", "QuincyArcher" },
+		Bosses = { "SixthEspada", "BellCaptain", "HollowfiedReaper", "FrostCaptain", "HollowKing" },
+	},
+	{
+		Id = 3, Name = "Titan Wall Ruins", Theme = "Walls",
+		Floor = cc(96, 86, 72), Wall = cc(150, 140, 122), Accent = cc(255, 170, 90), Tint = cc(255, 238, 220),
+		Enemies = { "RogueScout", "PureTitan", "AbnormalTitan", "GarrisonGunner" },
+		Bosses = { "JawTitan", "FemaleTitan", "ArmoredTitan", "BeastTitan", "ColossalTitan" },
+	},
+	{
+		Id = 4, Name = "Demon Moon Mountain", Theme = "Shrine",
+		Floor = cc(44, 30, 40), Wall = cc(70, 40, 50), Accent = cc(255, 90, 120), Tint = cc(255, 222, 232),
+		Enemies = { "LesserDemon", "SpiderDemon", "DrumDemon", "SwampDemon" },
+		Bosses = { "LowerMoon", "IceFanDemon", "MoonSister", "CrescentWarrior", "DemonKing" },
+	},
+	{
+		Id = 5, Name = "Cursed Academy", Theme = "Academy",
+		Floor = cc(30, 30, 44), Wall = cc(62, 58, 84), Accent = cc(180, 110, 255), Tint = cc(232, 222, 255),
+		Enemies = { "CursedSpirit", "CursedStudent", "CurseUser", "FingerBearer" },
+		Bosses = { "PatchworkCurse", "VolcanoCurse", "ForestCurse", "BlindfoldRogue", "KingOfCurses" },
+	},
+	{
+		Id = 6, Name = "Grand Line Cove", Theme = "Cove",
+		Floor = cc(160, 140, 100), Wall = cc(90, 64, 44), Accent = cc(80, 200, 255), Tint = cc(235, 245, 255),
+		Enemies = { "MarineGrunt", "PirateBrawler", "Fishman", "PirateSwordsman" },
+		Bosses = { "ViceAdmiral", "FlameCommander", "FeatherWarlord", "MagmaAdmiral", "SeaEmperor" },
+	},
+	{
+		Id = 7, Name = "Hero City Rooftops", Theme = "City",
+		Floor = cc(52, 54, 62), Wall = cc(78, 82, 96), Accent = cc(255, 220, 60), Tint = cc(240, 240, 255),
+		Enemies = { "VillainThug", "BrainBeast", "HeroHunter", "LeagueGoon" },
+		Bosses = { "WarpMist", "HandMaskVillain", "MonsterCaptain", "DeepSeaKing", "SymbolOfVillainy" },
+	},
+	{
+		Id = 8, Name = "Saiyan Wastes", Theme = "Wastes",
+		Floor = cc(120, 96, 70), Wall = cc(150, 110, 80), Accent = cc(255, 225, 60), Tint = cc(255, 240, 215),
+		Enemies = { "SproutWarrior", "TyrantSoldier", "RogueAndroid", "RogueNamekian" },
+		Bosses = { "ForceCaptain", "AndroidQueen", "BioAndroid", "PinkMajin", "GalacticTyrant" },
+	},
+}
+Config.StagesPerZone = Config.Dungeon.FloorsPerZone
+
+-- Which ores a floor can drop: a new ore every 5 floors, the newest is rarest.
+local function floorDrops(f: number, boss: boolean)
+	local maxOrder = math.min(#Config.Ores, 2 + math.ceil(f / 5) + (boss and 1 or 0))
 	local drops = {}
 	for o = math.max(1, maxOrder - 7), maxOrder do
 		drops[Config.Ores[o].Id] = 100 * 0.6 ^ (maxOrder - o)
@@ -192,69 +242,86 @@ local function stageDrops(i: number, boss: boolean)
 	return drops
 end
 
-Config.Stages = {}
-for z, names in ipairs(STAGE_NAMES) do
-	for k, enemy in ipairs(names) do
-		local i = (z - 1) * Config.StagesPerZone + k
-		local boss = k == Config.StagesPerZone
-		local C = Config.PathCurve
-		local hp = C.BaseHP * C.HPGrowth ^ (i - 1)
-		local coins = C.BaseCoins * C.CoinGrowth ^ (i - 1)
-		table.insert(Config.Stages, {
-			Index = i,
-			Zone = z,
-			Enemy = enemy,
-			Boss = boss,
-			HP = boss and hp * C.BossHPMult or hp,
-			Coins = math.floor(boss and coins * C.BossCoinMult or coins),
-			Count = boss and 1 or C.SpawnCount,
-			Kills = boss and 1 or C.KillsToAdvance,
-			Color = Config.Zones[z].Accent:Lerp(Color3.fromHSV(((i * 0.137) % 1), 0.6, 1), 0.45),
-			Drops = stageDrops(i, boss),
-		})
+-- Floor data (generated on demand and cached). Floors are endless.
+local floorCache = {}
+function Config.Floor(f: number)
+	f = math.max(1, math.floor(f))
+	local cached = floorCache[f]
+	if cached then
+		return cached
 	end
+	local D = Config.Dungeon
+	local cycle = math.floor((f - 1) / (D.FloorsPerZone * #Config.Zones)) -- 0 = normal, 1+ = nightmare
+	local zi = math.floor((f - 1) / D.FloorsPerZone) % #Config.Zones + 1
+	local zone = Config.Zones[zi]
+	local inZone = (f - 1) % D.FloorsPerZone + 1 -- 1..25
+	local boss = f % D.BossEvery == 0
+	local look, name
+	if boss then
+		look = zone.Bosses[math.clamp(inZone // D.BossEvery, 1, #zone.Bosses)]
+	else
+		look = zone.Enemies[math.floor((inZone - 1) / 6) % #zone.Enemies + 1]
+	end
+	local second = zone.Enemies[(math.floor((inZone - 1) / 6) + 1) % #zone.Enemies + 1]
+	name = (Config.EnemyArchetypes[look] and Config.EnemyArchetypes[look].Name) or look
+	if cycle > 0 then
+		name = (cycle == 1 and "Nightmare " or ("Nightmare " .. (cycle + 1) .. " ")) .. name
+	end
+	local hp = D.BaseHP * D.HPGrowth ^ (f - 1)
+	local coins = D.BaseCoins * D.CoinGrowth ^ (f - 1)
+	local data = {
+		Index = f,
+		Zone = zi,
+		ZoneData = zone,
+		Cycle = cycle,
+		InZone = inZone,
+		Boss = boss,
+		Look = look,
+		MixLook = not boss and inZone > 3 and second or nil, -- later floors mix two enemy types
+		Enemy = name,
+		HP = boss and hp * D.BossHPMult or hp,
+		Coins = math.floor(boss and coins * D.BossCoinMult or coins),
+		Count = boss and 1 or math.min(D.MaxCount, D.BaseCount + math.floor(f / 12)),
+		Color = zone.Accent:Lerp(Color3.fromHSV(((f * 0.137) % 1), 0.6, 1), 0.35),
+		Drops = floorDrops(f, boss),
+		ZoneStart = f - inZone + 1,
+	}
+	data.Kills = data.Count
+	floorCache[f] = data
+	return data
 end
 
--- Path geometry (shared by MapBuilder, the world map and the client).
+-- Checkpoints you may start a run from (always includes floor 1).
+function Config.Checkpoints(bestFloor: number, fastTravel: boolean?): { number }
+	local D = Config.Dungeon
+	local list = { 1 }
+	local step = fastTravel and D.FastTravelEvery or D.CheckpointEvery
+	local cp = step
+	while cp + D.CheckpointEvery <= (bestFloor or 0) or (fastTravel and cp + step <= (bestFloor or 0)) do
+		table.insert(list, cp)
+		cp += step
+	end
+	return list
+end
+
+-- Lobby layout (shared by MapBuilder, the world map and the client).
 Config.World = {
-	PlazaRadius = 72,
-	PathStartZ = -120, -- the first gate
-	PathWidth = 72,
-	StageLen = 90,
-	BossLen = 130,
-	TrainCenter = Vector3.new(-200, 0, 0),
-	BossRushCenter = Vector3.new(200, 0, 0),
+	PlazaRadius = 70,
+	DungeonGate = Vector3.new(0, 0, -110), -- the dungeon entrance north of spawn
+	TrainCenter = Vector3.new(-190, 0, 0),
+	BossRushCenter = Vector3.new(190, 0, 0),
 }
 
--- Returns zStart (gate side), zEnd, center for stage i.
-function Config.StageBounds(i: number): (number, number, Vector3)
-	local W = Config.World
-	local z = W.PathStartZ
-	for k = 1, i - 1 do
-		z -= Config.Stages[k].Boss and W.BossLen or W.StageLen
-	end
-	local len = Config.Stages[i].Boss and W.BossLen or W.StageLen
-	return z, z - len, Vector3.new(0, 0, z - len / 2)
-end
-
 -- World map fog of war: regions you have walked into (saved per player).
-Config.ExploreKeys = { Hub = true, Train = true, BossRush = true }
-for i in ipairs(Config.Stages) do
-	Config.ExploreKeys["S" .. i] = true
-end
-for _, zone in ipairs(Config.Zones) do
-	Config.ExploreKeys["Z" .. zone.Id] = true
-end
+Config.ExploreKeys = { Hub = true, Train = true, BossRush = true, Dungeon = true }
 
-Config.EnemyRespawn = 2.5 -- seconds (normal enemies)
-Config.BossRespawn = 25 -- seconds
-Config.StageSleepTime = 30 -- despawn a stage's enemies after this long with nobody near
-Config.EliteChance = 0.04 -- rare golden "Elite" spawn
+Config.EnemyRespawn = 2.5 -- (boss rush only; dungeon rooms spawn one wave)
+Config.EliteChance = 0.05 -- rare golden "Elite" spawn
 Config.EliteHPMult = 5
 Config.EliteDropMult = 3
 Config.BossOreDrops = 6
 Config.BossRerollChance = 0.05
-Config.EnemyAggroRange = 38
+Config.EnemyAggroRange = 44
 Config.EnemyAttackRange = 6.5
 Config.EnemyAttackCooldown = 1.6
 Config.EnemyHitPercent = 0.06 -- % of player max HP per hit
@@ -418,10 +485,52 @@ Config.Overdrive = {
 }
 
 ---------------------------------------------------------------------
+-- SKILL MASTERY  (per weapon type; using E / R skills and getting kills
+-- with a weapon type levels it up)
+---------------------------------------------------------------------
+Config.Mastery = {
+	MaxLevel = 100,
+	XPBase = 6, -- xp for level L -> L+1 = XPBase * (L+1)^XPPow
+	XPPow = 1.5,
+	SkillXP = { E = 4, R = 10 },
+	KillXP = 1,
+	EliteKillXP = 6,
+	BossKillXP = 30,
+	DamagePerLevel = 0.03, -- +3% skill damage per level
+	CooldownPerLevel = 0.003, -- -0.3% skill cooldown per level
+	Milestones = {
+		{ Level = 10, Name = "Adept", Desc = "+15% skill range and area" },
+		{ Level = 25, Name = "Expert", Desc = "-20% skill stamina cost" },
+		{ Level = 50, Name = "Master", Desc = "-15% skill cooldowns" },
+		{ Level = 100, Name = "Grandmaster", Desc = "x1.5 skill damage, golden skill VFX" },
+	},
+}
+
+-- level, xp into the level, xp needed for the next level
+function Config.MasteryLevel(xp: number): (number, number, number)
+	local M = Config.Mastery
+	local level = 0
+	xp = math.max(0, xp or 0)
+	while level < M.MaxLevel do
+		local need = math.floor(M.XPBase * (level + 1) ^ M.XPPow)
+		if xp < need then
+			return level, xp, need
+		end
+		xp -= need
+		level += 1
+	end
+	return M.MaxLevel, 0, 0
+end
+
+function Config.MasteryHas(level: number, milestoneLevel: number): boolean
+	return (level or 0) >= milestoneLevel
+end
+
+---------------------------------------------------------------------
 -- BOSS RUSH  (endless bosses back to back; each boss adds a timer)
 ---------------------------------------------------------------------
 Config.BossRush = {
-	StageReq = 5, -- clear stage 5 (the first boss) to enter
+	StageReq = 5, -- beat the floor 5 boss to enter
 	TimePerBoss = 45,
 	BaseHP = 2500,
 	HPGrowth = 1.55,
@@ -444,7 +553,7 @@ Config.GamePasses = {
 	AutoCollect = { Id = 0, Name = "Auto-Collect", Desc = "Ore flies straight into your bag (no pickup needed)." },
 	ExtraBackpack = { Id = 0, Name = "Bigger Bag", Desc = "+50% ore bag capacity." },
 	DoubleOverdrive = { Id = 0, Name = "2x Overdrive", Desc = "Transformations last twice as long." },
-	FastTravel = { Id = 0, Name = "Fast Travel", Desc = "Teleport to any stage you have reached." },
+	FastTravel = { Id = 0, Name = "Fast Travel", Desc = "Dungeon checkpoints every 10 floors instead of 25." },
 	ChromaTrail = { Id = 0, Name = "Chroma Trail", Desc = "Rainbow trail while you move. Pure flex." },
 	MCPity = { Id = 0, Name = "Main Character Boost", Desc = "Slightly raises Main Character odds (never guaranteed)." },
 	DoubleTraining = { Id = 0, Name = "2x Training", Desc = "Doubles Power from every swing." },
@@ -478,7 +587,7 @@ Config.Codes = {
 -- Leave 0 for no music. Any id you put here plays as a looping track.
 Config.Music = {
 	Hub = 0,
-	Path = 0,
+	Dungeon = 0,
 	BossRush = 0,
 }
 -- Override any sound source with your own asset, e.g. Slash = "rbxassetid://123".
@@ -924,58 +1033,117 @@ end
 -- Log = true stores log10 of the value so huge exponential numbers fit.
 Config.Leaderboards = {
 	{ Key = "Power", Title = "TOP POWER", Store = "PlusOneAnime_LB_Power_v2", Log = true, Color = Color3.fromRGB(120, 255, 170) },
-	{ Key = "Stage", Title = "FURTHEST STAGE", Store = "PlusOneAnime_LB_Stage_v2", Color = Color3.fromRGB(255, 200, 90) },
+	{ Key = "Stage", Title = "DEEPEST FLOOR", Store = "PlusOneAnime_LB_Floor_v3", Color = Color3.fromRGB(255, 200, 90) },
 	{ Key = "Prestige", Title = "TOP REBIRTHS", Store = "PlusOneAnime_LB_Prestige_v2", Color = Color3.fromRGB(210, 150, 255) },
 	{ Key = "Kills", Title = "TOP SLAYERS", Store = "PlusOneAnime_LB_Kills_v2", Color = Color3.fromRGB(255, 110, 120) },
 }
 Config.LeaderboardRefresh = 60
 
 ---------------------------------------------------------------------
--- ENEMY AVATARS  (built from the Roblox catalog, like Catalog Avatar Creator)
+-- ENEMY ARCHETYPES  (chibi anime figures: big heads, big eyes, bold hair)
 ---------------------------------------------------------------------
--- Each stage searches the catalog for these keywords and dresses the enemy
--- in real items (hair, hat/mask, shirt, pants). Results are cached. If the
--- catalog can't be reached, the procedural anime look below is used.
--- Put exact asset ids in Config.EnemyCatalogOverrides[stage] to pin items.
-local AVATAR_THEMES = {
-	{ Hair = { "anime spiky hair", "red long hair", "brown messy hair", "black bun hair", "white long hair" }, Hat = { "headband", "oni horns", "", "samurai mask", "crown" }, Shirt = { "school uniform", "gakuran", "hoodie", "blazer", "student council" }, Pants = { "black pants", "school pants", "jeans", "hakama", "white pants" } },
-	{ Hair = { "cyber hair", "neon hair", "buzz cut", "white hair", "red spiky hair" }, Hat = { "goggles", "visor", "ninja mask", "cyber mask", "admiral hat" }, Shirt = { "tech jacket", "mech suit", "ninja suit", "armor", "captain coat" }, Pants = { "cargo pants", "tech pants", "black pants", "armor pants", "white pants" } },
-	{ Hair = { "pink hair", "fox ears", "samurai ponytail", "witch hair", "long white hair" }, Hat = { "lantern", "kitsune mask", "straw hat", "witch hat", "demon horns" }, Shirt = { "kimono", "yukata", "samurai", "witch robe", "demon queen" }, Pants = { "kimono pants", "hakama", "samurai pants", "black skirt", "red pants" } },
-	{ Hair = { "blue hair", "knight hair", "slicked hair", "silver hair", "general hair" }, Hat = { "space helmet", "knight helmet", "beret", "halo", "military cap" }, Shirt = { "space suit", "knight armor", "sniper", "paladin", "military uniform" }, Pants = { "space pants", "armor pants", "cargo pants", "white pants", "military pants" } },
-	{ Hair = { "white fluffy hair", "bald", "ice blue hair", "frost hair", "silver long hair" }, Hat = { "fur hat", "monk", "snow goggles", "ice crown", "frost crown" }, Shirt = { "winter coat", "monk robe", "ronin", "ice armor", "emperor" }, Pants = { "snow pants", "monk pants", "hakama", "armor pants", "white pants" } },
-	{ Hair = { "black hair", "chaos hair", "dark knight", "demon hair", "black long hair" }, Hat = { "hood", "cult mask", "dark helmet", "demon horns", "dark crown" }, Shirt = { "dark cloak", "cultist robe", "dark knight", "demon armor", "king robe" }, Pants = { "black pants", "robe pants", "armor pants", "demon pants", "royal pants" } },
+-- Every enemy is built by code from one of these looks (no catalog needed):
+--   Skin, Hair (Spiky / Long / Bun / Short / Messy / Ponytail / Twin / Bald),
+--   HairColor, Eye (iris colour), Top / Bottom / Trim colours,
+--   Outfit (Vest / Robe / Coat / Armor / Gi / Uniform / Cloak / Bare),
+--   Gear (Headband, Mask, HollowMask, Horns, Hood, Scarf, Cape, Haori,
+--   Eyepatch, Crown, Gourd, Glasses, Cap, Bandana, StrawHat, CowboyHat,
+--   Blindfold, Antenna, Wings, Tails, Scouter, Halo, Marks),
+--   Weapon (Katana, Kunai, Blades, Staff, Scythe, Club, Fists, Gun, Bow, Fan),
+--   Size (1 = normal, titans are bigger), Aura (bosses glow in this colour).
+local SKIN = { Light = c(255, 224, 196), Fair = c(245, 208, 178), Tan = c(214, 164, 120), Dark = c(140, 96, 70), Pale = c(236, 236, 240), Grey = c(150, 150, 160) }
+Config.EnemyArchetypes = {
+	-- 1 Hidden Leaf Forest
+	RogueGenin = { Name = "Rogue Genin", Skin = SKIN.Light, Hair = "Spiky", HairColor = c(70, 50, 36), Eye = c(90, 60, 40), Top = c(66, 84, 60), Bottom = c(40, 44, 52), Trim = c(180, 190, 200), Outfit = "Vest", Gear = { "Headband" }, Weapon = "Kunai" },
+	SoundNinja = { Name = "Sound Ninja", Skin = SKIN.Fair, Hair = "Long", HairColor = c(170, 170, 180), Eye = c(120, 90, 200), Top = c(214, 204, 184), Bottom = c(60, 50, 70), Trim = c(110, 80, 160), Outfit = "Gi", Gear = { "Headband", "Scarf" }, Weapon = "Fists" },
+	PuppetNinja = { Name = "Puppet Ninja", Skin = SKIN.Tan, Hair = "Short", HairColor = c(40, 36, 40), Eye = c(160, 60, 60), Top = c(36, 36, 46), Bottom = c(30, 30, 38), Trim = c(160, 40, 50), Outfit = "Cloak", Gear = { "Hood", "Marks" }, Weapon = "Blades" },
+	MaskedAnbu = { Name = "Masked Anbu", Skin = SKIN.Fair, Hair = "Short", HairColor = c(160, 160, 170), Eye = c(200, 50, 50), Top = c(42, 42, 50), Bottom = c(38, 38, 46), Trim = c(210, 210, 220), Outfit = "Armor", Gear = { "Mask" }, Weapon = "Katana" },
+	SandGourd = { Name = "Sand Gourd Host", Skin = SKIN.Fair, Hair = "Messy", HairColor = c(200, 50, 40), Eye = c(90, 200, 160), Top = c(120, 40, 40), Bottom = c(80, 30, 30), Trim = c(210, 180, 120), Outfit = "Coat", Gear = { "Gourd", "Marks" }, Weapon = "Fists", Aura = c(230, 190, 110) },
+	SnakeSage = { Name = "Snake Sage", Skin = SKIN.Pale, Hair = "Long", HairColor = c(30, 30, 36), Eye = c(240, 210, 60), Top = c(230, 225, 215), Bottom = c(110, 80, 150), Trim = c(120, 80, 170), Outfit = "Robe", Gear = { "Marks" }, Weapon = "Katana", Aura = c(150, 90, 220) },
+	RedCloudRogue = { Name = "Red Cloud Rogue", Skin = SKIN.Fair, Hair = "Long", HairColor = c(26, 26, 32), Eye = c(230, 30, 40), Top = c(24, 22, 28), Bottom = c(24, 22, 28), Trim = c(210, 40, 50), Outfit = "Cloak", Gear = { "Headband" }, Weapon = "Kunai", Aura = c(230, 40, 60) },
+	ShadowAvenger = { Name = "Shadow Avenger", Skin = SKIN.Fair, Hair = "Spiky", HairColor = c(30, 32, 50), Eye = c(230, 30, 40), Top = c(215, 215, 220), Bottom = c(40, 40, 60), Trim = c(120, 90, 200), Outfit = "Robe", Gear = {}, Weapon = "Katana", Aura = c(140, 110, 255) },
+	NineTailsHost = { Name = "Nine-Tails Host", Skin = SKIN.Light, Hair = "Spiky", HairColor = c(255, 210, 60), Eye = c(255, 120, 30), Top = c(255, 140, 40), Bottom = c(255, 140, 40), Trim = c(30, 30, 50), Outfit = "Gi", Gear = { "Headband", "Tails", "Marks" }, Weapon = "Fists", Aura = c(255, 130, 40), Size = 1.1 },
+	-- 2 Soul Reaper Gates
+	Hollow = { Name = "Hollow", Skin = c(30, 30, 36), Hair = "Bald", HairColor = c(30, 30, 36), Eye = c(255, 220, 60), Top = c(30, 30, 36), Bottom = c(30, 30, 36), Trim = c(240, 240, 240), Outfit = "Bare", Gear = { "HollowMask", "Horns" }, Weapon = "Fists" },
+	RogueReaper = { Name = "Rogue Soul Reaper", Skin = SKIN.Fair, Hair = "Spiky", HairColor = c(40, 40, 46), Eye = c(80, 140, 220), Top = c(26, 26, 30), Bottom = c(26, 26, 30), Trim = c(240, 240, 240), Outfit = "Robe", Gear = {}, Weapon = "Katana" },
+	Arrancar = { Name = "Arrancar", Skin = SKIN.Pale, Hair = "Spiky", HairColor = c(60, 200, 190), Eye = c(60, 200, 190), Top = c(240, 240, 242), Bottom = c(240, 240, 242), Trim = c(30, 30, 36), Outfit = "Coat", Gear = { "HollowMask" }, Weapon = "Katana" },
+	QuincyArcher = { Name = "Quincy Archer", Skin = SKIN.Fair, Hair = "Short", HairColor = c(36, 40, 60), Eye = c(80, 120, 220), Top = c(245, 245, 250), Bottom = c(245, 245, 250), Trim = c(70, 110, 220), Outfit = "Uniform", Gear = { "Glasses" }, Weapon = "Bow" },
+	SixthEspada = { Name = "Sixth Espada", Skin = SKIN.Fair, Hair = "Spiky", HairColor = c(60, 200, 220), Eye = c(60, 200, 220), Top = c(240, 240, 242), Bottom = c(240, 240, 242), Trim = c(30, 30, 36), Outfit = "Coat", Gear = { "HollowMask" }, Weapon = "Katana", Aura = c(60, 200, 220) },
+	BellCaptain = { Name = "Bell-Haired Captain", Skin = SKIN.Tan, Hair = "Spiky", HairColor = c(26, 26, 30), Eye = c(240, 200, 60), Top = c(26, 26, 30), Bottom = c(26, 26, 30), Trim = c(240, 240, 240), Outfit = "Robe", Gear = { "Haori", "Eyepatch" }, Weapon = "Katana", Aura = c(255, 220, 60), Size = 1.25 },
+	HollowfiedReaper = { Name = "Hollowfied Reaper", Skin = SKIN.Light, Hair = "Spiky", HairColor = c(255, 140, 40), Eye = c(255, 220, 60), Top = c(26, 26, 30), Bottom = c(26, 26, 30), Trim = c(200, 40, 40), Outfit = "Robe", Gear = { "HollowMask", "Horns" }, Weapon = "Katana", Aura = c(200, 30, 40) },
+	FrostCaptain = { Name = "Frost Captain", Skin = SKIN.Fair, Hair = "Spiky", HairColor = c(235, 240, 250), Eye = c(80, 220, 180), Top = c(26, 26, 30), Bottom = c(26, 26, 30), Trim = c(120, 220, 255), Outfit = "Robe", Gear = { "Haori", "Scarf" }, Weapon = "Katana", Aura = c(150, 225, 255) },
+	HollowKing = { Name = "The Hollow King", Skin = SKIN.Pale, Hair = "Long", HairColor = c(245, 245, 250), Eye = c(255, 220, 60), Top = c(240, 240, 242), Bottom = c(240, 240, 242), Trim = c(160, 120, 255), Outfit = "Coat", Gear = { "Crown", "Wings" }, Weapon = "Katana", Aura = c(170, 120, 255), Size = 1.2 },
+	-- 3 Titan Wall Ruins
+	RogueScout = { Name = "Rogue Scout", Skin = SKIN.Fair, Hair = "Short", HairColor = c(90, 60, 40), Eye = c(60, 140, 90), Top = c(170, 130, 90), Bottom = c(230, 225, 210), Trim = c(40, 90, 60), Outfit = "Uniform", Gear = { "Cape" }, Weapon = "Blades" },
+	PureTitan = { Name = "Pure Titan", Skin = c(222, 170, 140), Hair = "Short", HairColor = c(80, 60, 40), Eye = c(40, 40, 40), Top = c(222, 170, 140), Bottom = c(222, 170, 140), Trim = c(180, 120, 100), Outfit = "Bare", Gear = {}, Weapon = "Fists", Size = 1.6 },
+	AbnormalTitan = { Name = "Abnormal Titan", Skin = c(212, 160, 132), Hair = "Long", HairColor = c(60, 44, 36), Eye = c(40, 40, 40), Top = c(212, 160, 132), Bottom = c(212, 160, 132), Trim = c(170, 110, 90), Outfit = "Bare", Gear = {}, Weapon = "Fists", Size = 1.5 },
+	GarrisonGunner = { Name = "Garrison Gunner", Skin = SKIN.Tan, Hair = "Short", HairColor = c(50, 40, 36), Eye = c(80, 60, 40), Top = c(160, 120, 80), Bottom = c(220, 215, 200), Trim = c(170, 40, 50), Outfit = "Uniform", Gear = { "Cap" }, Weapon = "Gun" },
+	JawTitan = { Name = "Jaw Titan", Skin = c(200, 150, 120), Hair = "Messy", HairColor = c(40, 34, 30), Eye = c(40, 40, 40), Top = c(200, 150, 120), Bottom = c(200, 150, 120), Trim = c(230, 230, 220), Outfit = "Armor", Gear = {}, Weapon = "Fists", Aura = c(255, 150, 90), Size = 1.5 },
+	FemaleTitan = { Name = "Female Titan", Skin = c(214, 160, 150), Hair = "Short", HairColor = c(240, 220, 150), Eye = c(80, 140, 220), Top = c(214, 160, 150), Bottom = c(214, 160, 150), Trim = c(170, 100, 100), Outfit = "Bare", Gear = { "Marks" }, Weapon = "Fists", Aura = c(255, 170, 150), Size = 1.8 },
+	ArmoredTitan = { Name = "Armored Titan", Skin = c(190, 150, 120), Hair = "Short", HairColor = c(230, 210, 160), Eye = c(240, 220, 120), Top = c(230, 210, 170), Bottom = c(190, 150, 120), Trim = c(240, 230, 200), Outfit = "Armor", Gear = {}, Weapon = "Fists", Aura = c(255, 220, 140), Size = 1.9 },
+	BeastTitan = { Name = "Beast Titan", Skin = c(160, 120, 90), Hair = "Messy", HairColor = c(120, 90, 60), Eye = c(60, 60, 60), Top = c(120, 90, 60), Bottom = c(120, 90, 60), Trim = c(90, 70, 50), Outfit = "Bare", Gear = {}, Weapon = "Club", Aura = c(200, 150, 90), Size = 2 },
+	ColossalTitan = { Name = "Colossal Titan", Skin = c(190, 70, 60), Hair = "Bald", HairColor = c(190, 70, 60), Eye = c(255, 240, 200), Top = c(190, 70, 60), Bottom = c(190, 70, 60), Trim = c(240, 220, 200), Outfit = "Bare", Gear = { "Marks" }, Weapon = "Fists", Aura = c(255, 110, 60), Size = 2.4 },
+	-- 4 Demon Moon Mountain
+	LesserDemon = { Name = "Lesser Demon", Skin = c(206, 180, 176), Hair = "Messy", HairColor = c(40, 30, 36), Eye = c(255, 60, 90), Top = c(70, 60, 80), Bottom = c(50, 44, 56), Trim = c(160, 40, 60), Outfit = "Robe", Gear = { "Horns", "Marks" }, Weapon = "Fists" },
+	SpiderDemon = { Name = "Spider Demon", Skin = SKIN.Pale, Hair = "Long", HairColor = c(245, 245, 250), Eye = c(255, 60, 60), Top = c(245, 245, 250), Bottom = c(245, 245, 250), Trim = c(200, 40, 50), Outfit = "Robe", Gear = { "Marks" }, Weapon = "Fists" },
+	DrumDemon = { Name = "Drum Demon", Skin = c(200, 170, 150), Hair = "Messy", HairColor = c(120, 90, 60), Eye = c(255, 180, 60), Top = c(90, 60, 50), Bottom = c(90, 60, 50), Trim = c(200, 160, 90), Outfit = "Gi", Gear = { "Horns" }, Weapon = "Club" },
+	SwampDemon = { Name = "Swamp Demon", Skin = c(170, 190, 160), Hair = "Short", HairColor = c(50, 70, 50), Eye = c(200, 255, 120), Top = c(50, 70, 56), Bottom = c(40, 50, 44), Trim = c(120, 160, 90), Outfit = "Cloak", Gear = { "Hood", "Horns" }, Weapon = "Fists" },
+	LowerMoon = { Name = "Lower Moon Demon", Skin = SKIN.Pale, Hair = "Long", HairColor = c(30, 30, 40), Eye = c(200, 60, 255), Top = c(40, 36, 60), Bottom = c(40, 36, 60), Trim = c(200, 60, 255), Outfit = "Coat", Gear = { "Horns", "Marks" }, Weapon = "Fists", Aura = c(200, 60, 255) },
+	IceFanDemon = { Name = "Ice Fan Demon", Skin = SKIN.Pale, Hair = "Messy", HairColor = c(235, 235, 245), Eye = c(160, 120, 255), Top = c(60, 50, 70), Bottom = c(40, 36, 48), Trim = c(150, 220, 255), Outfit = "Coat", Gear = { "Marks" }, Weapon = "Fan", Aura = c(150, 220, 255) },
+	MoonSister = { Name = "Upper Moon Sister", Skin = SKIN.Fair, Hair = "Twin", HairColor = c(30, 30, 40), Eye = c(120, 255, 180), Top = c(170, 40, 90), Bottom = c(60, 30, 50), Trim = c(120, 255, 180), Outfit = "Robe", Gear = { "Marks" }, Weapon = "Blades", Aura = c(120, 255, 180) },
+	CrescentWarrior = { Name = "Crescent Moon Warrior", Skin = c(220, 190, 180), Hair = "Ponytail", HairColor = c(40, 30, 50), Eye = c(255, 60, 60), Top = c(80, 40, 110), Bottom = c(40, 30, 50), Trim = c(255, 200, 80), Outfit = "Robe", Gear = { "Marks" }, Weapon = "Katana", Aura = c(160, 60, 255), Size = 1.15 },
+	DemonKing = { Name = "Crimson Demon King", Skin = SKIN.Pale, Hair = "Messy", HairColor = c(26, 26, 30), Eye = c(255, 40, 60), Top = c(245, 245, 250), Bottom = c(30, 30, 36), Trim = c(200, 20, 40), Outfit = "Coat", Gear = { "CowboyHat" }, Weapon = "Blades", Aura = c(220, 20, 50), Size = 1.2 },
+	-- 5 Cursed Academy
+	CursedSpirit = { Name = "Cursed Spirit", Skin = c(120, 130, 140), Hair = "Bald", HairColor = c(120, 130, 140), Eye = c(255, 240, 90), Top = c(90, 100, 110), Bottom = c(90, 100, 110), Trim = c(60, 60, 70), Outfit = "Bare", Gear = { "Marks", "Horns" }, Weapon = "Fists" },
+	CursedStudent = { Name = "Cursed Student", Skin = SKIN.Light, Hair = "Spiky", HairColor = c(255, 140, 170), Eye = c(120, 80, 60), Top = c(30, 36, 60), Bottom = c(30, 36, 60), Trim = c(220, 200, 90), Outfit = "Uniform", Gear = {}, Weapon = "Fists" },
+	CurseUser = { Name = "Curse User", Skin = SKIN.Fair, Hair = "Bun", HairColor = c(26, 26, 30), Eye = c(120, 60, 60), Top = c(200, 190, 170), Bottom = c(40, 40, 46), Trim = c(160, 60, 60), Outfit = "Robe", Gear = { "Marks" }, Weapon = "Staff" },
+	FingerBearer = { Name = "Finger Bearer", Skin = c(90, 90, 100), Hair = "Bald", HairColor = c(90, 90, 100), Eye = c(255, 60, 60), Top = c(70, 70, 80), Bottom = c(70, 70, 80), Trim = c(200, 60, 60), Outfit = "Bare", Gear = { "Marks", "Horns" }, Weapon = "Fists", Size = 1.35 },
+	PatchworkCurse = { Name = "Patchwork Curse", Skin = c(200, 205, 215), Hair = "Long", HairColor = c(90, 110, 140), Eye = c(120, 180, 255), Top = c(90, 100, 120), Bottom = c(60, 64, 80), Trim = c(200, 60, 80), Outfit = "Robe", Gear = { "Marks" }, Weapon = "Fists", Aura = c(120, 170, 255) },
+	VolcanoCurse = { Name = "Volcano Curse", Skin = c(210, 190, 170), Hair = "Bald", HairColor = c(90, 60, 50), Eye = c(255, 150, 40), Top = c(120, 50, 40), Bottom = c(80, 40, 36), Trim = c(255, 120, 40), Outfit = "Robe", Gear = { "Horns" }, Weapon = "Fists", Aura = c(255, 110, 40) },
+	ForestCurse = { Name = "Forest Curse", Skin = c(220, 214, 200), Hair = "Bald", HairColor = c(60, 90, 50), Eye = c(120, 255, 120), Top = c(230, 225, 210), Bottom = c(70, 60, 50), Trim = c(90, 150, 70), Outfit = "Cloak", Gear = { "Horns", "Marks" }, Weapon = "Staff", Aura = c(120, 255, 120) },
+	BlindfoldRogue = { Name = "Blindfold Rogue", Skin = SKIN.Fair, Hair = "Spiky", HairColor = c(245, 245, 250), Eye = c(120, 220, 255), Top = c(24, 26, 36), Bottom = c(24, 26, 36), Trim = c(120, 220, 255), Outfit = "Uniform", Gear = { "Blindfold" }, Weapon = "Fists", Aura = c(120, 220, 255), Size = 1.1 },
+	KingOfCurses = { Name = "King of Curses", Skin = SKIN.Light, Hair = "Spiky", HairColor = c(255, 150, 170), Eye = c(255, 40, 60), Top = c(245, 240, 235), Bottom = c(245, 240, 235), Trim = c(40, 30, 30), Outfit = "Robe", Gear = { "Marks" }, Weapon = "Fists", Aura = c(255, 40, 60), Size = 1.2 },
+	-- 6 Grand Line Cove
+	MarineGrunt = { Name = "Marine Grunt", Skin = SKIN.Light, Hair = "Short", HairColor = c(60, 44, 36), Eye = c(60, 90, 160), Top = c(245, 245, 250), Bottom = c(60, 90, 160), Trim = c(60, 90, 160), Outfit = "Uniform", Gear = { "Cap" }, Weapon = "Gun" },
+	PirateBrawler = { Name = "Pirate Brawler", Skin = SKIN.Tan, Hair = "Messy", HairColor = c(50, 36, 30), Eye = c(80, 60, 40), Top = c(200, 70, 60), Bottom = c(60, 70, 110), Trim = c(240, 210, 90), Outfit = "Vest", Gear = { "Bandana" }, Weapon = "Club" },
+	Fishman = { Name = "Fishman", Skin = c(90, 150, 200), Hair = "Short", HairColor = c(40, 60, 90), Eye = c(255, 220, 60), Top = c(240, 200, 80), Bottom = c(60, 60, 80), Trim = c(60, 110, 160), Outfit = "Vest", Gear = {}, Weapon = "Fists" },
+	PirateSwordsman = { Name = "Pirate Swordsman", Skin = SKIN.Tan, Hair = "Short", HairColor = c(90, 200, 110), Eye = c(40, 40, 40), Top = c(245, 245, 245), Bottom = c(40, 60, 50), Trim = c(40, 120, 70), Outfit = "Vest", Gear = { "Bandana" }, Weapon = "Katana" },
+	ViceAdmiral = { Name = "Vice Admiral", Skin = SKIN.Fair, Hair = "Short", HairColor = c(200, 200, 205), Eye = c(60, 90, 160), Top = c(245, 245, 250), Bottom = c(245, 245, 250), Trim = c(60, 90, 160), Outfit = "Coat", Gear = { "Cap" }, Weapon = "Fists", Aura = c(120, 170, 255), Size = 1.2 },
+	FlameCommander = { Name = "Flame Fist Commander", Skin = SKIN.Tan, Hair = "Messy", HairColor = c(30, 26, 26), Eye = c(40, 30, 30), Top = SKIN.Tan, Bottom = c(40, 40, 50), Trim = c(255, 120, 40), Outfit = "Bare", Gear = { "CowboyHat" }, Weapon = "Fists", Aura = c(255, 120, 40) },
+	FeatherWarlord = { Name = "Feather Warlord", Skin = SKIN.Tan, Hair = "Short", HairColor = c(240, 210, 90), Eye = c(255, 80, 180), Top = c(255, 110, 180), Bottom = c(240, 230, 220), Trim = c(255, 110, 180), Outfit = "Coat", Gear = { "Glasses", "Wings" }, Weapon = "Fists", Aura = c(255, 110, 180), Size = 1.3 },
+	MagmaAdmiral = { Name = "Magma Admiral", Skin = SKIN.Tan, Hair = "Short", HairColor = c(40, 36, 36), Eye = c(255, 90, 40), Top = c(160, 30, 40), Bottom = c(40, 36, 36), Trim = c(245, 245, 250), Outfit = "Coat", Gear = { "Cap" }, Weapon = "Fists", Aura = c(255, 80, 30), Size = 1.3 },
+	SeaEmperor = { Name = "Emperor of the Sea", Skin = SKIN.Tan, Hair = "Short", HairColor = c(245, 245, 250), Eye = c(60, 60, 60), Top = c(245, 245, 250), Bottom = c(90, 60, 50), Trim = c(240, 200, 80), Outfit = "Coat", Gear = { "Bandana" }, Weapon = "Club", Aura = c(255, 220, 90), Size = 1.6 },
+	-- 7 Hero City Rooftops
+	VillainThug = { Name = "Villain Thug", Skin = SKIN.Fair, Hair = "Messy", HairColor = c(90, 90, 100), Eye = c(200, 60, 60), Top = c(40, 40, 50), Bottom = c(30, 30, 40), Trim = c(200, 60, 60), Outfit = "Coat", Gear = { "Mask" }, Weapon = "Club" },
+	BrainBeast = { Name = "Brain Beast", Skin = c(30, 30, 36), Hair = "Bald", HairColor = c(220, 140, 160), Eye = c(255, 240, 200), Top = c(30, 30, 36), Bottom = c(30, 30, 36), Trim = c(220, 140, 160), Outfit = "Bare", Gear = { "Crown" }, Weapon = "Fists", Size = 1.4 },
+	HeroHunter = { Name = "Hero Hunter", Skin = SKIN.Fair, Hair = "Messy", HairColor = c(26, 26, 30), Eye = c(255, 60, 60), Top = c(80, 30, 36), Bottom = c(40, 30, 36), Trim = c(200, 40, 50), Outfit = "Armor", Gear = { "Scarf", "Bandana" }, Weapon = "Blades" },
+	LeagueGoon = { Name = "League Goon", Skin = SKIN.Fair, Hair = "Short", HairColor = c(90, 60, 50), Eye = c(120, 200, 255), Top = c(60, 66, 80), Bottom = c(30, 30, 40), Trim = c(120, 200, 255), Outfit = "Cloak", Gear = { "Hood" }, Weapon = "Gun" },
+	WarpMist = { Name = "Warp Mist", Skin = c(50, 30, 80), Hair = "Messy", HairColor = c(90, 40, 140), Eye = c(255, 230, 90), Top = c(30, 30, 36), Bottom = c(30, 30, 36), Trim = c(160, 90, 255), Outfit = "Coat", Gear = {}, Weapon = "Fists", Aura = c(150, 70, 255) },
+	HandMaskVillain = { Name = "Hand-Mask Villain", Skin = SKIN.Pale, Hair = "Long", HairColor = c(170, 190, 210), Eye = c(255, 40, 60), Top = c(30, 30, 36), Bottom = c(30, 30, 36), Trim = c(200, 40, 50), Outfit = "Coat", Gear = { "Mask" }, Weapon = "Fists", Aura = c(200, 40, 60) },
+	MonsterCaptain = { Name = "Monster Captain", Skin = c(230, 220, 200), Hair = "Spiky", HairColor = c(26, 26, 30), Eye = c(255, 200, 40), Top = c(40, 40, 46), Bottom = c(40, 40, 46), Trim = c(255, 200, 40), Outfit = "Armor", Gear = { "Horns" }, Weapon = "Fists", Aura = c(255, 200, 40), Size = 1.3 },
+	DeepSeaKing = { Name = "Deep Sea King", Skin = c(70, 120, 90), Hair = "Bald", HairColor = c(70, 120, 90), Eye = c(255, 240, 200), Top = c(70, 120, 90), Bottom = c(70, 120, 90), Trim = c(240, 240, 230), Outfit = "Bare", Gear = { "Crown" }, Weapon = "Fists", Aura = c(90, 220, 170), Size = 1.8 },
+	SymbolOfVillainy = { Name = "Symbol of Villainy", Skin = SKIN.Fair, Hair = "Short", HairColor = c(245, 245, 250), Eye = c(255, 60, 60), Top = c(24, 24, 28), Bottom = c(24, 24, 28), Trim = c(200, 30, 40), Outfit = "Coat", Gear = { "Mask" }, Weapon = "Fists", Aura = c(200, 30, 40), Size = 1.4 },
+	-- 8 Saiyan Wastes
+	SproutWarrior = { Name = "Sprout Warrior", Skin = c(90, 180, 80), Hair = "Bald", HairColor = c(90, 180, 80), Eye = c(255, 60, 60), Top = c(90, 180, 80), Bottom = c(90, 180, 80), Trim = c(60, 120, 50), Outfit = "Bare", Gear = { "Antenna" }, Weapon = "Fists", Size = 0.9 },
+	TyrantSoldier = { Name = "Tyrant Soldier", Skin = SKIN.Fair, Hair = "Spiky", HairColor = c(40, 36, 36), Eye = c(40, 40, 40), Top = c(245, 245, 245), Bottom = c(40, 60, 120), Trim = c(210, 170, 70), Outfit = "Armor", Gear = { "Scouter" }, Weapon = "Fists" },
+	RogueAndroid = { Name = "Rogue Android", Skin = SKIN.Light, Hair = "Short", HairColor = c(245, 225, 140), Eye = c(80, 170, 255), Top = c(40, 70, 130), Bottom = c(40, 40, 50), Trim = c(245, 245, 250), Outfit = "Vest", Gear = { "Scarf" }, Weapon = "Fists" },
+	RogueNamekian = { Name = "Rogue Namekian", Skin = c(110, 190, 90), Hair = "Bald", HairColor = c(110, 190, 90), Eye = c(40, 40, 40), Top = c(110, 60, 150), Bottom = c(110, 60, 150), Trim = c(245, 245, 250), Outfit = "Gi", Gear = { "Antenna", "Cape" }, Weapon = "Fists" },
+	ForceCaptain = { Name = "Force Captain", Skin = c(150, 90, 190), Hair = "Short", HairColor = c(40, 30, 40), Eye = c(40, 40, 40), Top = c(245, 245, 245), Bottom = c(40, 40, 50), Trim = c(210, 170, 70), Outfit = "Armor", Gear = { "Horns", "Scouter" }, Weapon = "Fists", Aura = c(180, 100, 255) },
+	AndroidQueen = { Name = "Android Queen", Skin = SKIN.Light, Hair = "Short", HairColor = c(250, 225, 120), Eye = c(80, 170, 255), Top = c(40, 70, 130), Bottom = c(40, 40, 50), Trim = c(245, 245, 250), Outfit = "Vest", Gear = {}, Weapon = "Fists", Aura = c(80, 170, 255) },
+	BioAndroid = { Name = "Perfect Bio-Android", Skin = c(100, 170, 90), Hair = "Bald", HairColor = c(30, 30, 30), Eye = c(200, 60, 200), Top = c(130, 190, 110), Bottom = c(40, 40, 40), Trim = c(40, 40, 40), Outfit = "Armor", Gear = { "Wings", "Crown" }, Weapon = "Fists", Aura = c(160, 255, 120), Size = 1.2 },
+	PinkMajin = { Name = "Pink Majin", Skin = c(255, 160, 190), Hair = "Bald", HairColor = c(255, 160, 190), Eye = c(40, 40, 40), Top = c(255, 160, 190), Bottom = c(245, 245, 250), Trim = c(120, 50, 150), Outfit = "Bare", Gear = { "Antenna", "Cape" }, Weapon = "Fists", Aura = c(255, 120, 190), Size = 1.3 },
+	GalacticTyrant = { Name = "Galactic Tyrant", Skin = c(245, 245, 250), Hair = "Bald", HairColor = c(160, 60, 190), Eye = c(255, 40, 60), Top = c(245, 245, 250), Bottom = c(245, 245, 250), Trim = c(160, 60, 190), Outfit = "Bare", Gear = { "Horns", "Tails" }, Weapon = "Fists", Aura = c(200, 60, 255), Size = 1.2 },
 }
-Config.EnemyAvatars = {}
-for i, stage in ipairs(Config.Stages) do
-	local theme = AVATAR_THEMES[stage.Zone] or AVATAR_THEMES[1]
-	local k = ((i - 1) % Config.StagesPerZone) + 1
-	Config.EnemyAvatars[i] = {
-		Hair = theme.Hair[k],
-		Hat = theme.Hat[k],
-		Shirt = theme.Shirt[k],
-		Pants = theme.Pants[k],
-		Skin = Color3.fromHSV(0.07, 0.18 + (i % 4) * 0.05, 0.95 - (i % 3) * 0.1),
-	}
+for id, a in pairs(Config.EnemyArchetypes) do
+	a.Id = id
 end
-Config.EnemyCatalogOverrides = {
-	-- [stageIndex] = { HairAccessory = "123,456", HatAccessory = "", FaceAccessory = "", Shirt = 0, Pants = 0, Face = 0 },
-}
--- Copy a real player's avatar instead (optional): [stageIndex] = userId
-Config.EnemyAvatarUserIds = {}
+-- Build style: "Chibi" (code-built anime figures) or "Catalog" (dress the
+-- rig from the Roblox catalog with Config.EnemyAvatarKeywords, falling back
+-- to Chibi when the catalog is unavailable).
+Config.EnemyModelStyle = "Chibi"
+Config.EnemyAvatarKeywords = {} -- [archetypeId] = { Hair = "...", Hat = "...", Shirt = "...", Pants = "..." }
+Config.EnemyAvatarUserIds = {} -- [archetypeId] = userId (copy a real avatar)
 
--- Procedural fallback looks (used if the catalog is unavailable).
-Config.EnemyLooks = {
-	[1] = { Hair = "Spiky", HairColor = c(255, 200, 60), Skin = c(255, 220, 190), Shirt = c(40, 40, 60), Pants = c(30, 30, 40), Extra = "Headband", Silhouette = "Brawler", Core = c(120, 255, 150) },
-	[2] = { Hair = "Long", HairColor = c(220, 40, 60), Skin = c(240, 200, 170), Shirt = c(230, 230, 235), Pants = c(40, 40, 50), Extra = "Horns", Silhouette = "Oni", Core = c(255, 70, 70) },
-	[3] = { Hair = "Spiky", HairColor = c(90, 60, 40), Skin = c(200, 160, 120), Shirt = c(200, 120, 40), Pants = c(70, 60, 50), Extra = "Headband", Silhouette = "Golem", Core = c(255, 170, 60) },
-	[4] = { Hair = "Bun", HairColor = c(30, 30, 40), Skin = c(250, 215, 185), Shirt = c(60, 80, 160), Pants = c(30, 30, 50), Extra = "Mask", Silhouette = "Ronin", Core = c(110, 150, 255) },
-	[5] = { Hair = "Long", HairColor = c(240, 240, 250), Skin = c(245, 215, 195), Shirt = c(120, 40, 180), Pants = c(30, 20, 40), Extra = "Crown", Silhouette = "Tyrant", Core = c(210, 90, 255) },
-	[6] = { Hair = "Spiky", HairColor = c(0, 230, 255), Skin = c(230, 200, 180), Shirt = c(40, 45, 60), Pants = c(25, 25, 35), Extra = "Visor", Silhouette = "Drone", Core = c(255, 170, 60) },
-	[7] = { Hair = "Bun", HairColor = c(255, 120, 200), Skin = c(240, 210, 190), Shirt = c(60, 60, 80), Pants = c(30, 30, 40), Extra = "Visor", Silhouette = "Mech", Core = c(120, 200, 255) },
-	[8] = { Hair = "Spiky", HairColor = c(40, 40, 50), Skin = c(220, 190, 170), Shirt = c(20, 20, 25), Pants = c(20, 20, 25), Extra = "Mask", Silhouette = "Shinobi", Core = c(255, 60, 200) },
-	[9] = { Hair = "Long", HairColor = c(0, 255, 180), Skin = c(235, 205, 185), Shirt = c(30, 60, 60), Pants = c(20, 30, 30), Extra = "Visor", Silhouette = "Warden", Core = c(0, 255, 180) },
-	[10] = { Hair = "Spiky", HairColor = c(255, 60, 60), Skin = c(245, 215, 195), Shirt = c(150, 20, 30), Pants = c(30, 20, 20), Extra = "Crown", Silhouette = "Admiral", Core = c(255, 50, 70) },
-}
 Config.EliteLook = {
 	Palette = c(38, 32, 28),
 	Trim = c(255, 205, 80),

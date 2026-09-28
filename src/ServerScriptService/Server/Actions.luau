@@ -1,7 +1,8 @@
 --!nonstrict
 -- Actions (ModuleScript) -> ServerScriptService/Server/Actions
 -- Handles every client request (forge, sell, upgrade, rebirth, race reroll,
--- overdrive, codes, teleports, shop, tower) with server-side validation.
+-- overdrive, codes, teleports, shop, dungeon, boss rush, index) with
+-- server-side validation.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -19,6 +20,7 @@ local TowerService = require(script.Parent:WaitForChild("TowerService"))
 local Util = require(script.Parent:WaitForChild("Util"))
 local Weapons = require(script.Parent:WaitForChild("Weapons"))
 local Forge = require(script.Parent:WaitForChild("Forge"))
+local DungeonService = require(script.Parent:WaitForChild("DungeonService"))
 
 local Actions = {}
 local map = nil
@@ -208,7 +210,6 @@ handlers.Redeem = function(player, code)
 end
 
 handlers.Teleport = function(player, dest)
-	local data = DataService.Get(player)
 	if type(dest) ~= "string" then
 		return
 	end
@@ -221,36 +222,36 @@ handlers.Teleport = function(player, dest)
 		end
 		return
 	end
-	-- spawn, the training grounds and the boss rush island are free
+	-- leaving the dungeon ends the run (back to floor 1 / a checkpoint)
+	if DungeonService.InRun(player) then
+		DungeonService.End(player, dest == "Hub" and "Home" or "Left")
+	end
 	if dest == "Hub" then
 		Util.Teleport(player, map.HubCFrame, "Spawn")
-		return
 	elseif dest == "Train" then
 		Util.Teleport(player, map.TrainCFrame, "Training Grounds")
-		return
 	elseif dest == "Tower" then
 		Util.Teleport(player, map.TowerCFrame, "Boss Rush")
+	elseif dest == "Dungeon" then
+		Util.Teleport(player, map.DungeonCFrame, "The Dungeon")
+	end
+end
+
+-- Start a dungeon run at floor 1 or an unlocked checkpoint.
+handlers.DungeonStart = function(player, floor)
+	if not near(player, map.DungeonPrompt and map.DungeonPrompt.Parent, 40) and not DungeonService.InRun(player) then
+		Net.Notify(player, "Go to the Dungeon gate (north of spawn) to start a run.", RED, "Error")
 		return
 	end
-	if dest:sub(1, 6) == "Stage_" then
-		local idx = tonumber(dest:sub(7))
-		local stage = idx and Config.Stages[idx]
-		if not stage then
-			return
-		end
-		if not Stats.StageUnlocked(data, idx) then
-			Net.Notify(player, "Stage " .. idx .. " is locked. Clear stage " .. (idx - 1) .. " first.", RED, "Error")
-			return
-		end
-		if not Stats.HasPass(player, "FastTravel") then
-			Net.Notify(player, "Fast Travel gamepass needed to jump to stages. Walk the Path for free!", RED, "Error")
-			return
-		end
-		local info = map.Path and map.Path.Stages[idx]
-		if info then
-			Util.Teleport(player, info.Entry, "Stage " .. idx)
-		end
-	end
+	DungeonService.Start(player, floor)
+end
+
+handlers.UnlockIndex = function(player, oreId)
+	Loot.UnlockIndex(player, oreId)
+end
+
+handlers.ScrapBulk = function(player, maxRarity)
+	Weapons.ScrapBulk(player, tonumber(maxRarity) or 2)
 end
 
 handlers.BuyPass = function(player, key)
@@ -278,8 +279,12 @@ handlers.Settings = function(player, settings)
 	if type(settings) ~= "table" then
 		return
 	end
-	data.Settings.Music = settings.Music == true
-	data.Settings.SFX = settings.SFX == true
+	for _, key in ipairs({ "Music", "SFX", "AutoEquip", "Shake", "DamageNumbers" }) do
+		if settings[key] ~= nil then
+			data.Settings[key] = settings[key] == true
+		end
+	end
+	DataService.MarkDirty(player)
 end
 
 -- World map fog of war (cosmetic). Only known region keys are accepted.
@@ -340,7 +345,7 @@ end
 ---------------------------------------------------------------------
 -- CUSTOM PROXIMITY PROMPTS (client fires Interact after Triggered)
 ---------------------------------------------------------------------
-local PANEL_FOR = { Upgrades = "Upgrades", Race = "Race", Rebirth = "Rebirth", Index = "Index", Forge = "Forge" }
+local PANEL_FOR = { Upgrades = "Upgrades", Race = "Race", Rebirth = "Rebirth", Index = "Index", Forge = "Forge", Dungeon = "Dungeon" }
 
 handlers.Interact = function(player, prompt)
 	if typeof(prompt) ~= "Instance" or not prompt:IsA("ProximityPrompt") or not prompt.Enabled then

@@ -25,6 +25,7 @@ local Monetization = require(script:WaitForChild("Monetization"))
 local Actions = require(script:WaitForChild("Actions"))
 local Admin = require(script:WaitForChild("Admin"))
 local Leaderboards = require(script:WaitForChild("Leaderboards"))
+local DungeonService = require(script:WaitForChild("DungeonService"))
 
 ---------------------------------------------------------------------
 -- WORLD
@@ -33,6 +34,7 @@ VFX.BuildLibrary() -- ReplicatedStorage.VFX: the editable effect hierarchy
 local map = MapBuilder.Build()
 task.spawn(EnemyService.Init, map) -- builds enemy rigs (yields), players can join meanwhile
 TowerService.Init(map)
+DungeonService.Init()
 Combat.Init(map)
 Actions.Init(map)
 Admin.Init(map)
@@ -54,7 +56,7 @@ DataService.OnFlush = function(player: Player)
 	if snap then
 		Net.Sync:FireClient(player, snap)
 		setStat(player, "Power", Format.Abbrev(snap.Power))
-		setStat(player, "Stage", tostring(snap.Stage))
+		setStat(player, "Floor", tostring(snap.BestFloor))
 		setStat(player, "Rebirths", (snap.Ascensions > 0 and ("A" .. snap.Ascensions .. " ") or "") .. Format.Abbrev(snap.Rebirths))
 	end
 end
@@ -74,6 +76,12 @@ end
 
 Admin.OnCosmetics = function(player: Player)
 	Cosmetics.Apply(player)
+end
+
+-- skill mastery xp for every kill you took part in
+EnemyService.OnReward = function(player: Player, enemy)
+	local M = Config.Mastery
+	Combat.GrantMastery(player, enemy.Boss and M.BossKillXP or (enemy.Elite and M.EliteKillXP or M.KillXP))
 end
 
 EnemyService.OnZenkai = function(player: Player)
@@ -107,7 +115,7 @@ end
 local function onPlayerAdded(player: Player)
 	local ls = Instance.new("Folder")
 	ls.Name = "leaderstats"
-	for _, name in ipairs({ "Power", "Stage", "Rebirths" }) do
+	for _, name in ipairs({ "Power", "Floor", "Rebirths" }) do
 		local v = Instance.new("StringValue")
 		v.Name = name
 		v.Value = "0"
@@ -116,6 +124,7 @@ local function onPlayerAdded(player: Player)
 	ls.Parent = player
 
 	player.CharacterAdded:Connect(function(char)
+		task.spawn(DungeonService.CharacterAdded, player, char)
 		onCharacter(player, char)
 	end)
 
@@ -139,6 +148,7 @@ end
 
 Players.PlayerRemoving:Connect(function(player)
 	TowerService.PlayerRemoving(player)
+	DungeonService.PlayerRemoving(player)
 	Actions.PlayerRemoving(player)
 	DataService.Release(player)
 end)

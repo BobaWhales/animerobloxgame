@@ -234,7 +234,7 @@ local function buildBossBar()
 	bossBar.Visible = false
 	bossBar.Size = UDim2.fromOffset(420, 34)
 	bossBar.AnchorPoint = Vector2.new(0.5, 0)
-	bossBar.Position = UDim2.new(0.5, 0, 0, 96)
+	bossBar.Position = UDim2.new(0.5, 0, 0, 150)
 	bossBar.Parent = root
 	bossName = H.Text(bossBar, { Text = "", Font = Config.Fonts.Display, Size = UDim2.new(1, 0, 0, 16), Color = Color3.fromRGB(255, 200, 210) })
 	local bg = H.Frame(bossBar, { Color = Color3.fromRGB(10, 6, 14), Transparency = 0.4, Size = UDim2.new(1, 0, 0, 5), Position = UDim2.fromOffset(0, 22), Corner = 3 })

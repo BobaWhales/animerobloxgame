@@ -36,17 +36,18 @@ local DEFAULT = {
 	RaceTier = "",
 	Rerolls = Config.StartingRerolls,
 	Overdrive = Config.Overdrive.StartingPotions,
-	Index = {}, -- [oreId] = true
+	Index = {}, -- [oreId] = true once unlocked in the Index
+	IndexFound = {}, -- [oreId] = true once picked up (waiting to be unlocked)
 	Kills = 0,
 	TowerBest = 0, -- best Boss Rush wave
-	-- the Path
-	Stage = 0, -- highest stage cleared
-	StageKills = 0, -- kills toward clearing the next stage
+	-- the Dungeon
+	BestFloor = 0, -- deepest floor reached (unlocks checkpoints)
 	Ascensions = 0,
+	Mastery = {}, -- [weaponClass] = xp
 	Codes = {}, -- [CODE] = true
 	StarterPack = false,
 	Receipts = {}, -- recent purchase ids (dedupe)
-	Settings = { Music = true, SFX = true },
+	Settings = { Music = true, SFX = true, AutoEquip = true, Shake = true, DamageNumbers = true },
 	-- weapons / loot
 	Weapons = {}, -- ["w1"] = { W = weaponId, R = rarityId, E = { [effectId] = points } }
 	NextWeaponId = 1,
@@ -119,6 +120,7 @@ local function newSession()
 		-- retention
 		SessionTime = 0,
 		PlaytimeClaimed = {},
+		Run = nil, -- current dungeon run info (DungeonService)
 	}
 end
 
@@ -144,6 +146,14 @@ function DataService.Load(player: Player)
 		data = deepCopy(DEFAULT)
 	end
 	reconcile(data, DEFAULT)
+	-- older saves tracked the 30-stage Path; carry it over as floors
+	if (data.Stage or 0) > (data.BestFloor or 0) then
+		data.BestFloor = data.Stage
+	end
+	-- older saves unlocked ores straight away
+	for oreId in pairs(data.Index) do
+		data.IndexFound[oreId] = true
+	end
 	profiles[player] = data
 	canSave[player] = success and store ~= nil
 	sessions[player].Loaded = true

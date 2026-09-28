@@ -178,7 +178,7 @@ local function build()
 		{ "+ Overdrive", "GiveOverdrive", "Red" },
 		{ "+ Catalysts", "GiveCatalysts", "Blue" },
 		{ "+ Every Ore", "GiveAllOres", "Blue" },
-		{ "Unlock Stages", "SetStage", "Green" },
+		{ "Set Deepest Floor", "SetFloor", "Green" },
 		{ "Heal", "Heal", "Green" },
 		{ "God Mode", "God", "Gold" },
 		{ "Speed x3", "Speed", "Blue" },

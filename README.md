@@ -1,18 +1,27 @@
 # +1 Loot for Anime
 
-A Roblox (Luau) anime simulator built on the *+1 Loot to Forge* loop. The main pieces:
-- **The Path:** fight down 30 stages. KO enemies to open each gate, and a boss guards every 5th stage.
-- **The Soul Forge:** loot 22 ores and forge them into 16 weapon classes. Each ore stamps its effect on the weapon, and secret 3-ore recipes forge iconic weapons.
-- **Armor:** rare drops that you wear visibly.
-- **Prestige:** exponential Rebirths and Ascensions, with training pads gated behind them.
-- **Boss Rush:** fight bosses back to back.
-- **Leaderboards** at spawn.
-- **Admin panel:** server events like 2x Luck or Coin Rain, plus give-anything tools.
+A Roblox (Luau) anime dungeon crawler built on the *+1 Loot To Forge* loop.
 
-It also has catalog-avatar enemies, an editable VFX library (`ReplicatedStorage.VFX`), a simulator-style HUD with a HOME button, and a holographic world map with fog of war.
+**The core loop**
+- **The Dungeon:** endless floors across 8 anime zones, with a boss every 5 floors.
+  - Enemies spawn only when you walk into a room.
+  - Dying or going home restarts the run, but checkpoints (every 25 floors) let you skip ahead.
+- **The Soul Forge:** turn 22 ores into weapons across 16 weapon classes. Ore effects carry over, and secret recipes forge iconic weapons. New weapons auto-equip.
 
+**Progression**
+- **Skill Mastery** for each weapon type.
+- Exponential Rebirths and Ascensions.
+- Armor drops, the Boss Rush and leaderboards.
+- An admin panel.
+
+**Look and feel**
+- Chibi anime-figure enemies, 72 of them, built by code.
+- Procedural combat animations.
+- Arena-style swords with swing trails.
+- A compact UI in Fredoka One, with tiny pop-ups.
+- A quieter, compressed sound mix.
+
+**Getting started**
 - **Play right away:** open `build/PlusOneLootForAnime.rbxlx` in Roblox Studio.
 - **Copy and paste into your own place:** all scripts are in `src/`. [SETUP.md](SETUP.md) shows where each one goes, plus controls, admin setup and config.
-- **UI (optional):** put `UIPackPlus` in ReplicatedStorage and it skins the UI.
-
-Rojo users: `rojo build default.project.json -o game.rbxlx` or `rojo serve`.
+- **Rojo users:** `rojo build default.project.json -o game.rbxlx` or `rojo serve`.

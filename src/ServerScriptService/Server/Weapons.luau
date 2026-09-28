@@ -154,6 +154,33 @@ function Weapons.Scrap(player: Player, uid: string)
 	DataService.MarkDirty(player)
 end
 
+-- QoL: scrap every unequipped weapon at or below a rarity (1 = Common,
+-- 2 = Uncommon...). Recipe weapons are always kept.
+function Weapons.ScrapBulk(player: Player, maxIndex: number)
+	local data = DataService.Get(player)
+	if not data then
+		return
+	end
+	maxIndex = math.clamp(math.floor(maxIndex), 1, 4)
+	local total, count = 0, 0
+	for uid, rec in pairs(data.Weapons) do
+		local r = Config.WeaponRarityById[rec.R]
+		local def = Config.WeaponById[rec.W]
+		if uid ~= data.Equipped and r and r.Index <= maxIndex and not (def and def.Recipe) then
+			data.Weapons[uid] = nil
+			total += r.Scrap
+			count += 1
+		end
+	end
+	if count == 0 then
+		Net.Notify(player, "Nothing to scrap.", Color3.fromRGB(255, 170, 90), "Error")
+		return
+	end
+	data.Coins += total
+	Net.Notify(player, "Scrapped " .. count .. " weapons for " .. total .. " Coins.", Color3.fromRGB(255, 215, 70), "Sell")
+	DataService.MarkDirty(player)
+end
+
 ---------------------------------------------------------------------
 -- ARMOR
 ---------------------------------------------------------------------

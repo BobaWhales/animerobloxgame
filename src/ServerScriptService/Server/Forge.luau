@@ -131,10 +131,16 @@ function Forge.Craft(player: Player, payload)
 	data.Blade += gained
 	local _, tierBefore = Config.GetBladeTier(before)
 	local tier, tierAfter = Config.GetBladeTier(data.Blade)
+	-- QoL: new weapons go straight into your hands (Settings -> Auto-Equip)
+	local autoEquip = data.Settings.AutoEquip ~= false and uid ~= nil
+	if autoEquip then
+		data.Equipped = uid
+	end
 	Weapons.Refresh(player)
 	DataService.MarkDirty(player)
 
 	Net.FX(player, "ForgeResult", {
+		Equipped = autoEquip,
 		Uid = uid,
 		Weapon = def.Id,
 		Rarity = rarityId,

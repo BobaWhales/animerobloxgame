@@ -2,8 +2,8 @@
 -- Client (LocalScript) -> StarterPlayer/StarterPlayerScripts/Client
 -- Put the UI, Hud, WeaponUI, ForgeUI, AdminUI, Abilities, PromptUI, Drops,
 -- WorldText, WorldMap, EnemyFX, CameraDirector and Movement ModuleScripts
--- INSIDE this LocalScript. Handles server FX events, world VFX/SFX, the Path
--- gates, training pads and zones.
+-- INSIDE this LocalScript. Handles server FX events, world VFX/SFX, dungeon
+-- runs, training pads and zones.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -31,6 +31,7 @@ local WorldMap = require(script:WaitForChild("WorldMap"))
 local EnemyFX = require(script:WaitForChild("EnemyFX"))
 local CameraDirector = require(script:WaitForChild("CameraDirector"))
 local Movement = require(script:WaitForChild("Movement"))
+local ProcAnim = require(script:WaitForChild("ProcAnim"))
 
 local player = Players.LocalPlayer
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -63,6 +64,7 @@ CameraDirector.Blocked = function()
 	return WorldMap.IsOpen or UI.IsPanelOpen()
 end
 Movement.Init()
+ProcAnim.Init()
 
 Abilities.OnFeedback = function(kind)
 	if kind == "NoStamina" then
@@ -73,8 +75,8 @@ Abilities.OnFeedback = function(kind)
 end
 
 local data = nil
-local currentStage = 0
 local currentZone = 0
+local setZoneLookRef: (number) -> () = function() end
 
 local function myRoot(): BasePart?
 	local c = player.Character
@@ -98,56 +100,6 @@ end
 
 player.CharacterAdded:Connect(function()
 	Drops.ClearAll()
-	currentStage = -1
-end)
-
----------------------------------------------------------------------
--- GATES (a stage's gate opens once the stage before it is cleared)
----------------------------------------------------------------------
-local function refreshGate(gate: BasePart)
-	if not data then
-		return
-	end
-	local stageIndex = gate:GetAttribute("Stage")
-	local stage = stageIndex and Config.Stages[stageIndex]
-	if not stage then
-		return
-	end
-	local zone = Config.Zones[stage.Zone]
-	local open = data.Stage >= stageIndex - 1
-	local label = gate:FindFirstChild("GateLabel")
-	if not open and label then
-		-- live kill counter on the next locked gate
-		local prev = Config.Stages[stageIndex - 1]
-		local text = "CLEAR STAGE " .. (stageIndex - 1)
-		if prev and data.Stage == stageIndex - 2 then
-			text ..= prev.Boss and "  -  DEFEAT THE BOSS" or ("  " .. math.min(data.StageKills or 0, prev.Kills) .. "/" .. prev.Kills)
-		end
-		WorldText.SetText(label, "Title", text)
-	end
-	if gate:GetAttribute("Open") == open then
-		return
-	end
-	gate:SetAttribute("Open", open)
-	gate.CanCollide = not open
-	gate.Transparency = open and 0.9 or 0.15
-	if label and open then
-		WorldText.SetText(label, "Title", (stage.Boss and "BOSS STAGE " or "STAGE ") .. stageIndex)
-	end
-	if open and stageIndex > 1 and gate:GetAttribute("Seen") then
-		UI.Notify("Gate to stage " .. stageIndex .. " is open!", zone.Accent)
-		SFX.Play("Stage")
-	end
-	gate:SetAttribute("Seen", true)
-end
-
-local function refreshGates()
-	for _, g in ipairs(CollectionService:GetTagged("StageGate")) do
-		refreshGate(g)
-	end
-end
-CollectionService:GetInstanceAddedSignal("StageGate"):Connect(function(g)
-	refreshGate(g)
 end)
 
 ---------------------------------------------------------------------
@@ -158,10 +110,13 @@ SyncRemote.OnClientEvent:Connect(function(snapshot)
 	data = snapshot
 	UI.Update(snapshot)
 	WorldMap.Update(snapshot)
-	refreshGates()
-	if old and snapshot.Blade > old.Blade then
-		UI.Bump("Blade")
+	-- dungeon zone look / music follows the run you are in
+	local zoneNow = snapshot.Run and snapshot.Run.Zone or 0
+	if zoneNow ~= currentZone then
+		currentZone = zoneNow
+		setZoneLookRef(zoneNow)
 	end
+	local _ = old
 end)
 
 ---------------------------------------------------------------------
@@ -183,6 +138,8 @@ FX.Attack = function(p)
 		return
 	end
 	if p.Player ~= player then
+		ProcAnim.Attack(char, p.Class, p.Combo)
+		ProcAnim.TrailBurst(char, 0.3)
 		local class = Config.WeaponClasses[p.Class]
 		if class and class.Kind == "Melee" then
 			VFX.Slash(root.CFrame * CFrame.new(0, 0.6, 0), p.Color, class.Range / 9, p.Combo % 2 == 0)
@@ -310,7 +267,7 @@ FX.ForgeResult = function(p)
 	UI.Bump("Blade")
 	SFX.Play("Forge")
 	local title = p.Recipe and (p.FirstRecipe and "NEW RECIPE DISCOVERED!" or "UNIQUE RECIPE!") or "FORGED!"
-	WeaponUI.Reveal(p.Weapon, p.Rarity, title, p.Effects)
+	WeaponUI.Reveal(p.Weapon, p.Rarity, title, p.Effects, p.Equipped)
 	if p.TierUp then
 		task.delay(3.2, function()
 			local char = player.Character
@@ -424,12 +381,11 @@ FX.Discover = function(p)
 		return
 	end
 	SFX.Play("Discover")
-	VFX.TitleCard("NEW ORE DISCOVERED!", ore.Name .. "  (+" .. Format.Abbrev(p.Reward) .. " Coins)", ore.Color, 2)
-	UI.FlyToHud("Coins", nil, Color3.fromRGB(255, 210, 60), 6)
+	UI.Notify("New ore found! Unlock it in the Index for +" .. Format.Abbrev(p.Reward) .. " Coins", ore.Color)
 end
 
 FX.BossSpawn = function(p)
-	if not p.Global and currentStage ~= p.Stage then
+	if not p.Global then
 		return
 	end
 	SFX.Play("BossSpawn")
@@ -453,6 +409,7 @@ FX.Slam = function(p)
 end
 
 FX.EnemySwipe = function(p)
+	ProcAnim.EnemyStrike(p.Model)
 	local cf = CFrame.lookAt(p.Pos, Vector3.new(p.Target.X, p.Pos.Y, p.Target.Z))
 	VFX.Slash(cf, Color3.fromRGB(255, 70, 70), 0.6, math.random() < 0.5)
 	SFX.Play("Swing", { At = p.Pos, Pitch = 0.7, Volume = 0.5 })
@@ -510,24 +467,78 @@ FX.Tower = function(p)
 	end
 end
 
--- Path progress
-FX.StageKill = function(p)
-	local root = myRoot()
-	if root and p.Need and p.Need > 1 then
-		VFX.TextPop(root.Position + Vector3.new(0, 4, 0), p.Kills .. " / " .. p.Need, Color3.fromRGB(255, 215, 90), 0.7)
+-- Dungeon runs
+FX.RunStarted = function(p)
+	SFX.Play("TowerStart")
+	UI.Close()
+	local fd = Config.Floor(p.Floor)
+	VFX.TitleCard("FLOOR " .. p.Floor, fd.ZoneData.Name, fd.ZoneData.Accent, 1.6)
+end
+
+FX.FloorStart = function(p)
+	local fd = Config.Floor(p.Floor)
+	SFX.Play(p.Boss and "BossSpawn" or "Stage", { Volume = 0.8 })
+	if p.Boss then
+		VFX.Shake(0.3)
+		VFX.TitleCard("BOSS FLOOR " .. p.Floor, p.Name, Color3.fromRGB(255, 80, 100), 1.6)
+	else
+		UI.Banner("FLOOR " .. p.Floor, fd.ZoneData.Name, fd.ZoneData.Accent)
 	end
 end
 
-FX.StageCleared = function(p)
-	local stage = Config.Stages[p.Stage]
-	local zone = stage and Config.Zones[stage.Zone]
-	local color = zone and zone.Accent or Color3.fromRGB(120, 255, 170)
-	SFX.Play(p.Boss and "Milestone" or "Stage")
+FX.EnemySpawn = function(p)
+	VFX.Ring(p.Pos - Vector3.new(0, 0.8, 0), p.Color or Color3.fromRGB(255, 80, 100), p.Boss and 14 or 5, 0.4)
+	VFX.Emit(p.Pos, "Void", p.Boss and 30 or 10, p.Color)
+	SFX.Play("Telegraph", { At = p.Pos, Volume = 0.4, Pitch = 1.3 })
+end
+
+FX.GateOpen = function(p)
+	VFX.Emit(p.Pos, "Sparks", 24, p.Color)
+	VFX.Flash(p.Pos, p.Color, 8, 0.3)
+	SFX.Play("Stage", { At = p.Pos })
+end
+
+FX.FloorCleared = function(p)
+	local fd = Config.Floor(p.Floor)
+	local color = fd.ZoneData.Accent
+	SFX.Play(p.Boss and "Milestone" or "Discover", { Volume = 0.7 })
 	if p.Boss then
-		VFX.ImpactFrame(color, 1.3)
+		VFX.ImpactFrame(color, 0.8)
+		VFX.TitleCard("BOSS DOWN!", "Take the stairs to floor " .. p.Next, color, 1.8)
+	else
+		VFX.TitleCard("FLOOR " .. p.Floor .. " CLEARED", "Door to floor " .. p.Next .. " is open", color, 1.2)
 	end
-	local nextStage = Config.Stages[p.Stage + 1]
-	VFX.TitleCard((p.Boss and "BOSS STAGE " or "STAGE ") .. p.Stage .. " CLEARED!", nextStage and ("The gate to stage " .. (p.Stage + 1) .. " is open") or "You conquered the Path!", color, 2)
+end
+
+FX.Descend = function(p)
+	SFX.Play("Teleport")
+	VFX.ScreenFlash(Color3.fromRGB(20, 10, 40), 0, 0.6)
+	local _ = p
+end
+
+FX.RunEnded = function(p)
+	SFX.Play(p.Reason == "Died" and "TowerLose" or "UIClose")
+	UI.RunSummary(p)
+	SFX.PlayMusic(Config.Music.Hub)
+end
+
+FX.IndexUnlocked = function(p)
+	local ore = Config.OreById[p.Ore]
+	if not ore then
+		return
+	end
+	SFX.Play("Discover")
+	VFX.TitleCard(ore.Name:upper() .. " UNLOCKED", "+" .. Format.Abbrev(p.Reward) .. " Coins", ore.Color, 1.4)
+	UI.FlyToHud("Coins", nil, Color3.fromRGB(255, 210, 60), 5)
+end
+
+FX.MasteryUp = function(p)
+	SFX.Play(p.Milestone and "Milestone" or "PowerGain")
+	if p.Milestone then
+		VFX.TitleCard(p.Class:upper() .. " " .. p.Milestone:upper() .. "!", p.Desc, Color3.fromRGB(255, 200, 60), 2)
+	else
+		UI.Notify(p.Class .. " mastery Lv " .. p.Level, Color3.fromRGB(255, 200, 60))
+	end
 end
 
 FX.OpenPanel = function(p)
@@ -539,7 +550,6 @@ FX.Teleported = function(p)
 	SFX.Play("Teleport")
 	VFX.ScreenFlash(Color3.fromRGB(230, 220, 255), 0.1, 0.5)
 	VFX.FOVPunch(12)
-	currentStage = -1
 	if p.Where then
 		UI.Banner(p.Where, nil, Color3.fromRGB(220, 200, 255))
 	end
@@ -585,6 +595,7 @@ FX.Dash = function(p)
 	end
 	local char = charOf(p.Player)
 	if char then
+		ProcAnim.Play(char, "Dash", 0.35)
 		VFX.Afterimage(char, weaponColor(p.Player))
 		local root = char:FindFirstChild("HumanoidRootPart")
 		if root then
@@ -616,7 +627,12 @@ FX.Skill = function(p)
 	local root = char and char:FindFirstChild("HumanoidRootPart")
 	local isLocal = p.Player == player
 	local pos = root and root.Position or p.Pos
-	local color = skill.Color
+	-- Grandmaster mastery turns skill VFX gold
+	local color = (p.Mastery or 0) >= Config.Mastery.Milestones[4].Level and Color3.fromRGB(255, 205, 60) or skill.Color
+	if not isLocal and char then
+		ProcAnim.Skill(char, p.Player:GetAttribute("WeaponClass"), p.Slot)
+		ProcAnim.TrailBurst(char, 0.45)
+	end
 	local dir = p.Dir or Vector3.new(0, 0, -1)
 	local flatDir = Vector3.new(dir.X, 0, dir.Z)
 	flatDir = flatDir.Magnitude > 0.01 and flatDir.Unit or Vector3.new(0, 0, -1)
@@ -750,6 +766,7 @@ end
 -- ENEMY TELEGRAPHS
 ---------------------------------------------------------------------
 FX.EnemyWindup = function(p)
+	ProcAnim.Play(p.Model, "Windup", p.Time)
 	if p.Kind == "Slam" then
 		VFX.Telegraph(p.Pos, p.Radius, p.Time)
 	else
@@ -917,15 +934,11 @@ local function setZoneLook(zoneId: number)
 	if gameColor then
 		TweenService:Create(gameColor, TweenInfo.new(1.5), { TintColor = tint }):Play()
 	end
-	local music = zoneId == 0 and Config.Music.Hub or Config.Music.Path
+	local music = zoneId == 0 and Config.Music.Hub or Config.Music.Dungeon
 	SFX.PlayMusic(music)
 end
 
-local function pointInPart(part: BasePart, pos: Vector3): boolean
-	local rel = part.CFrame:PointToObjectSpace(pos)
-	local half = part.Size / 2
-	return math.abs(rel.X) <= half.X and math.abs(rel.Y) <= half.Y and math.abs(rel.Z) <= half.Z
-end
+setZoneLookRef = setZoneLook
 
 -- gently flickering flames / lanterns (lights tagged "Flicker")
 local flickers = {}
@@ -1001,29 +1014,6 @@ RunService.RenderStepped:Connect(function(dt)
 	end
 	UI.SetPad(padMult, padLocked)
 
-	-- which stage room are we in?
-	local stageNow, zoneNow = 0, 0
-	for _, room in ipairs(CollectionService:GetTagged("StageRoom")) do
-		if pointInPart(room :: BasePart, root.Position) then
-			stageNow = room:GetAttribute("Stage") or 0
-			zoneNow = room:GetAttribute("Zone") or 0
-			break
-		end
-	end
-	if zoneNow ~= currentZone then
-		currentZone = zoneNow
-		setZoneLook(zoneNow)
-	end
-	if stageNow ~= currentStage then
-		local prev = currentStage
-		currentStage = stageNow
-		if stageNow > 0 and prev >= 0 then
-			local stage = Config.Stages[stageNow]
-			local zone = Config.Zones[stage.Zone]
-			UI.Banner("STAGE " .. stageNow, (stage.Boss and "BOSS: " or "") .. stage.Enemy, zone.Accent)
-			SFX.Play("Stage")
-		end
-	end
 end)
 
 task.spawn(function()

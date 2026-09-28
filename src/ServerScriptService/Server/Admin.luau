@@ -210,10 +210,10 @@ cmd.GiveArmor = function(_, p, args)
 	end
 end
 
-cmd.SetStage = function(_, p, args)
+-- sets the deepest floor reached (unlocks the checkpoints below it)
+cmd.SetFloor = function(_, p, args)
 	local data = DataService.Get(p)
-	data.Stage = math.clamp(math.floor(num(args.Amount, #Config.Stages)), 0, #Config.Stages)
-	data.StageKills = 0
+	data.BestFloor = math.clamp(math.floor(num(args.Amount, 100)), 0, 100000)
 	changed(p)
 end
 
@@ -263,10 +263,11 @@ end
 
 cmd.ResetData = function(_, p)
 	local data = DataService.Get(p)
-	for _, key in ipairs({ "Power", "Coins", "Blade", "Rebirths", "Ascensions", "Runes", "Stage", "StageKills", "Kills", "TowerBest" }) do
+	for _, key in ipairs({ "Power", "Coins", "Blade", "Rebirths", "Ascensions", "Runes", "BestFloor", "Kills", "TowerBest" }) do
 		data[key] = 0
 	end
 	data.Backpack = {}
+	data.Mastery = {}
 	changed(p)
 	Net.Notify(p, "Your progress was reset by an admin.", Color3.fromRGB(255, 120, 90), "Error")
 end
@@ -319,7 +320,7 @@ global.OreRain = function()
 		local char = p.Character
 		local root = char and char:FindFirstChild("HumanoidRootPart")
 		if data and root then
-			local stage = Config.Stages[math.clamp(data.Stage + 1, 1, #Config.Stages)]
+			local stage = Config.Floor(math.max(1, data.BestFloor or 1))
 			for _ = 1, 12 do
 				local a = math.random() * math.pi * 2
 				local r = 4 + math.random() * 10
@@ -334,7 +335,7 @@ global.CoinRain = function()
 	for _, p in ipairs(Players:GetPlayers()) do
 		local data = DataService.Get(p)
 		if data then
-			local coins = math.floor(2000 * Stats.CoinMult(p) * (1 + data.Stage))
+			local coins = math.floor(2000 * Stats.CoinMult(p) * (1 + (data.BestFloor or 0)))
 			data.Coins += coins
 			Net.FX(p, "Reward", { Coins = coins, Pos = (p.Character and p.Character:GetPivot().Position) or Vector3.zero })
 			DataService.MarkDirty(p)
@@ -368,19 +369,13 @@ global.BossInvasion = function()
 	for _, p in ipairs(Players:GetPlayers()) do
 		best = math.max(best, Stats.Damage(p))
 	end
-	local bossStages = {}
-	for i, st in ipairs(Config.Stages) do
-		if st.Boss then
-			table.insert(bossStages, i)
-		end
-	end
-	local stageIndex = bossStages[math.random(1, #bossStages)]
-	local stage = Config.Stages[stageIndex]
+	local stage = Config.Floor(math.random(1, #Config.Zones * 5) * Config.Dungeon.BossEvery)
+	local stageIndex = stage.Index
 	local R = Config.World.PlazaRadius
 	local boss
 	boss = EnemyService.Create({
 		Label = "INVASION: " .. stage.Enemy,
-		LookIndex = stageIndex,
+		Look = stage.Look,
 		Color = Color3.fromRGB(255, 60, 80),
 		Scale = 3.4,
 		HP = best * 400 * math.max(1, #Players:GetPlayers()),
@@ -394,7 +389,7 @@ global.BossInvasion = function()
 			for p in pairs(boss and boss.Damagers or {}) do
 				local data = DataService.Get(p)
 				if data and p.Parent then
-					local coins = math.floor(10000 * Stats.CoinMult(p) * (1 + data.Stage))
+					local coins = math.floor(10000 * Stats.CoinMult(p) * (1 + (data.BestFloor or 0)))
 					data.Coins += coins
 					data.Keys.RareScroll = (data.Keys.RareScroll or 0) + 1
 					if math.random() < 0.3 then
@@ -408,7 +403,7 @@ global.BossInvasion = function()
 			Net.FXAll("Notify", { Text = "The invasion was defeated! Everyone who helped got loot.", Color = GOLD, Sound = "BossKill" })
 		end,
 	})
-	Net.FXAll("BossSpawn", { Name = "INVASION: " .. stage.Enemy, Stage = stageIndex, Zone = 0, Pos = Vector3.new(0, 4, -8), Color = stage.Color, Global = true })
+	Net.FXAll("BossSpawn", { Name = "INVASION: " .. stage.Enemy, Floor = stageIndex, Zone = 0, Pos = Vector3.new(0, 4, -8), Color = stage.Color, Global = true })
 end
 
 ---------------------------------------------------------------------

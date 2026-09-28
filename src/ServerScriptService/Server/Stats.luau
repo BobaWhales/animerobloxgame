@@ -213,6 +213,13 @@ function Stats.Cooldown(player: Player, skillId: string, base: number): number
 		cd *= 0.85
 	end
 	cd *= 1 - Stats.Effect(player, "Chrono")
+	-- skill mastery: -0.3% per level, -15% more at Master
+	local M = Config.Mastery
+	local level = Stats.MasteryLevel(player)
+	cd *= 1 - math.min(level * M.CooldownPerLevel, 0.3)
+	if level >= M.Milestones[3].Level then
+		cd *= 0.85
+	end
 	return cd
 end
 
@@ -368,9 +375,22 @@ function Stats.PadUnlocked(data, pad): boolean
 	return data.Rebirths >= (pad.Rebirths or 0)
 end
 
--- A stage is open once the one before it is cleared.
-function Stats.StageUnlocked(data, stageIndex: number): boolean
-	return Config.Stages[stageIndex] ~= nil and data.Stage >= stageIndex - 1
+---------------------------------------------------------------------
+-- SKILL MASTERY (per weapon class)
+---------------------------------------------------------------------
+function Stats.MasteryLevel(player: Player, class: string?): number
+	local data = DataService.Get(player)
+	if not data then
+		return 0
+	end
+	class = class or Stats.Weapon(player).Class
+	return (Config.MasteryLevel((data.Mastery or {})[class] or 0))
+end
+
+-- Multiplier on skill damage from mastery (+3%/level, x1.5 at Grandmaster).
+function Stats.MasteryDamage(level: number): number
+	local M = Config.Mastery
+	return (1 + level * M.DamagePerLevel) * (level >= M.Milestones[4].Level and 1.5 or 1)
 end
 
 ---------------------------------------------------------------------
@@ -474,8 +494,11 @@ function Stats.Snapshot(player: Player)
 		Cosmetics = data.Cosmetics,
 		Explored = data.Explored,
 		PlaytimeClaimed = s.PlaytimeClaimed,
-		Stage = data.Stage,
-		StageKills = data.StageKills,
+		BestFloor = data.BestFloor or 0,
+		Run = s.Run,
+		Checkpoints = Config.Checkpoints(data.BestFloor or 0, Stats.HasPass(player, "FastTravel")),
+		Mastery = data.Mastery,
+		IndexFound = data.IndexFound,
 		Ascensions = data.Ascensions,
 		AscendReq = Config.AscendReq(data.Ascensions),
 		Armors = data.Armors,

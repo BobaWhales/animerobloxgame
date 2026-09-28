@@ -7,6 +7,10 @@
 -- Sources are Roblox built-in engine sounds (always available) plus the
 -- classic Roblox sword sounds. If an asset fails to load it automatically
 -- falls back to a built-in sound. Swap any source in Config.SoundOverrides.
+--
+-- Mixing: everything plays through one SoundGroup with a gentle compressor
+-- and a soft high cut (keeps the mix quiet and smooth), and every cue is
+-- rate-limited so a burst of hits / pickups never stacks into noise.
 
 local ContentProvider = game:GetService("ContentProvider")
 local SoundService = game:GetService("SoundService")
@@ -61,7 +65,7 @@ local CUES = {
 	Hit = {
 		{ S = "Blip", V = 0.12, P = { 3.6, 4 } },
 		{ S = "Thud", V = 0.55, P = { 1.3, 1.6 }, Fx = { Bass = 3 } },
-		{ S = "Boom", V = 0.22, P = { 2.6, 3.1 }, Fx = { Distort = 0.35 } },
+		{ S = "Boom", V = 0.22, P = { 2.6, 3.1 }, Fx = { Distort = 0.15 } },
 		{ S = "Splash", V = 0.06, P = { 2.4, 2.8 }, D = 0.02 },
 	},
 	HitBlade = {
@@ -72,7 +76,7 @@ local CUES = {
 	},
 	HitBlunt = {
 		{ S = "Thud", V = 0.7, P = { 0.9, 1.1 }, Fx = { Bass = 6 } },
-		{ S = "Boom", V = 0.3, P = { 1.9, 2.2 }, Fx = { Distort = 0.45 } },
+		{ S = "Boom", V = 0.3, P = { 1.9, 2.2 }, Fx = { Distort = 0.2 } },
 		{ S = "Blip", V = 0.08, P = { 3, 3.3 } },
 	},
 	HitEnergy = {
@@ -106,7 +110,7 @@ local CUES = {
 		{ S = "Blip", Arp = { NOTE.C, NOTE.E, NOTE.G, NOTE.C2, NOTE.E2 }, Gap = 0.05, V = 0.35 },
 	},
 	BossKill = {
-		{ S = "Boom", V = 1, P = 0.55, Fx = { Reverb = true, Bass = 8 } },
+		{ S = "Boom", V = 0.72, P = 0.55, Fx = { Reverb = true, Bass = 8 } },
 		{ S = "Boom", V = 0.8, P = 0.8, D = 0.18, Fx = { Reverb = true } },
 		{ S = "Splash", V = 0.5, P = 0.6, D = 0.1 },
 		{ S = "Blip", Arp = { NOTE.C, NOTE.E, NOTE.G, NOTE.C2, NOTE.E2, NOTE.G2, NOTE.C3 }, Gap = 0.06, V = 0.4, D = 0.35, Fx = { Echo = true } },
@@ -131,8 +135,8 @@ local CUES = {
 	ForgeTierUp = {
 		{ S = "Boom", V = 0.9, P = 0.5, Fx = { Reverb = true, Bass = 8 } },
 		{ S = "Unsheath", V = 0.7, P = 0.75, D = 0.1, Fx = { Reverb = true } },
-		{ S = "Blip", Chord = { NOTE.C, NOTE.E, NOTE.G }, V = 0.3, D = 0.25, Fx = { Distort = 0.25, Reverb = true } },
-		{ S = "Blip", Chord = { NOTE.C2, NOTE.E2, NOTE.G2 }, V = 0.3, D = 0.5, Fx = { Distort = 0.25, Reverb = true } },
+		{ S = "Blip", Chord = { NOTE.C, NOTE.E, NOTE.G }, V = 0.3, D = 0.25, Fx = { Distort = 0.12, Reverb = true } },
+		{ S = "Blip", Chord = { NOTE.C2, NOTE.E2, NOTE.G2 }, V = 0.3, D = 0.5, Fx = { Distort = 0.12, Reverb = true } },
 	},
 	Sell = {
 		{ S = "Thud", V = 0.5, P = 1.2 },
@@ -140,7 +144,7 @@ local CUES = {
 	},
 	Rebirth = {
 		{ S = "Rise", V = 0.8, P = 0.6, Fx = { Reverb = true } },
-		{ S = "Boom", V = 1, P = 0.4, D = 0.6, Fx = { Reverb = true, Bass = 10 } },
+		{ S = "Boom", V = 0.72, P = 0.4, D = 0.6, Fx = { Reverb = true, Bass = 6 } },
 		{ S = "Splash", V = 0.6, P = 0.4, D = 0.6 },
 		{ S = "Blip", Arp = { NOTE.C, NOTE.D, NOTE.E, NOTE.G, NOTE.A, NOTE.C2, NOTE.E2, NOTE.G2, NOTE.C3 }, Gap = 0.06, V = 0.4, D = 0.7, Fx = { Echo = true } },
 	},
@@ -152,32 +156,32 @@ local CUES = {
 		{ S = "Blip", Arp = { NOTE.C, NOTE.E, NOTE.G, NOTE.C2 }, Gap = 0.06, V = 0.4 },
 	},
 	RaceRevealLegend = {
-		{ S = "Boom", V = 1, P = 0.45, Fx = { Reverb = true, Bass = 10 } },
+		{ S = "Boom", V = 0.72, P = 0.45, Fx = { Reverb = true, Bass = 6 } },
 		{ S = "Rise", V = 0.7, P = 0.8 },
-		{ S = "Blip", Chord = { NOTE.C, NOTE.E, NOTE.G, NOTE.C2 }, V = 0.3, D = 0.15, Fx = { Distort = 0.3, Reverb = true } },
+		{ S = "Blip", Chord = { NOTE.C, NOTE.E, NOTE.G, NOTE.C2 }, V = 0.3, D = 0.15, Fx = { Distort = 0.15, Reverb = true } },
 		{ S = "Blip", Arp = { NOTE.C2, NOTE.E2, NOTE.G2, NOTE.C3, NOTE.G2, NOTE.C3 }, Gap = 0.07, V = 0.4, D = 0.3, Fx = { Echo = true } },
 	},
 	Overdrive = {
 		{ S = "Whoosh", V = 0.7, P = 0.5, Fx = { Reverb = true } },
-		{ S = "Boom", V = 1, P = 0.35, D = 0.25, Fx = { Reverb = true, Bass = 10 } },
+		{ S = "Boom", V = 0.72, P = 0.35, D = 0.25, Fx = { Reverb = true, Bass = 6 } },
 		-- "power chord sting"
-		{ S = "Blip", Chord = { NOTE.C, NOTE.G, NOTE.C2 }, V = 0.45, D = 0.25, Fx = { Distort = 0.6, Reverb = true } },
-		{ S = "Blip", Chord = { NOTE.D, NOTE.A, 2.245 }, V = 0.45, D = 0.5, Fx = { Distort = 0.6, Reverb = true } },
+		{ S = "Blip", Chord = { NOTE.C, NOTE.G, NOTE.C2 }, V = 0.45, D = 0.25, Fx = { Distort = 0.15, Reverb = true } },
+		{ S = "Blip", Chord = { NOTE.D, NOTE.A, 2.245 }, V = 0.45, D = 0.5, Fx = { Distort = 0.15, Reverb = true } },
 	},
 	Zenkai = {
 		{ S = "Boom", V = 0.9, P = 0.5, Fx = { Reverb = true, Bass = 8 } },
-		{ S = "Blip", Chord = { NOTE.C, NOTE.G, NOTE.C2 }, V = 0.4, Fx = { Distort = 0.7 } },
+		{ S = "Blip", Chord = { NOTE.C, NOTE.G, NOTE.C2 }, V = 0.4, Fx = { Distort = 0.15 } },
 	},
 	PlotArmor = {
 		{ S = "Blip", Arp = { NOTE.C3, NOTE.G2, NOTE.C3 }, Gap = 0.08, V = 0.5, Fx = { Echo = true } },
 		{ S = "Thud", V = 0.7, P = 0.8 },
 	},
 	BossSpawn = {
-		{ S = "Boom", V = 1, P = 0.3, Fx = { Reverb = true, Bass = 10 } },
-		{ S = "Boom", V = 0.8, P = 0.28, D = 0.45, Fx = { Reverb = true, Bass = 10 } },
+		{ S = "Boom", V = 0.72, P = 0.3, Fx = { Reverb = true, Bass = 6 } },
+		{ S = "Boom", V = 0.8, P = 0.28, D = 0.45, Fx = { Reverb = true, Bass = 6 } },
 	},
 	BossSlam = {
-		{ S = "Boom", V = 1, P = 0.65, Fx = { Bass = 8 } },
+		{ S = "Boom", V = 0.72, P = 0.65, Fx = { Bass = 8 } },
 		{ S = "Thud", V = 0.9, P = 0.6 },
 	},
 	Telegraph = {
@@ -284,20 +288,20 @@ local CUES = {
 	},
 	CeroShot = {
 		{ S = "Boom", V = 0.2, P = { 2.6, 3 } },
-		{ S = "Blip", V = 0.15, P = { 1.9, 2.1 }, Fx = { Distort = 0.4 } },
+		{ S = "Blip", V = 0.15, P = { 1.9, 2.1 }, Fx = { Distort = 0.2 } },
 	},
 	Getsuga = {
 		{ S = "Whoosh", V = 0.8, P = 0.45, Fx = { Reverb = true } },
 		{ S = "Lunge", V = 0.7, P = 0.6 },
 		{ S = "Boom", V = 0.8, P = 0.6, D = 0.05, Fx = { Bass = 8 } },
-		{ S = "Blip", Chord = { NOTE.C, NOTE.G, NOTE.C2 }, V = 0.3, D = 0.05, Fx = { Distort = 0.5, Reverb = true } },
+		{ S = "Blip", Chord = { NOTE.C, NOTE.G, NOTE.C2 }, V = 0.3, D = 0.05, Fx = { Distort = 0.12, Reverb = true } },
 	},
 	ChargeUp = {
 		{ S = "Rise", V = 0.6, P = 1.4 },
 		{ S = "Blip", Arp = { NOTE.C, NOTE.E, NOTE.G, NOTE.C2, NOTE.E2 }, Gap = 0.2, V = 0.25 },
 	},
 	RasenganHit = {
-		{ S = "Boom", V = 1, P = 0.5, Fx = { Reverb = true, Bass = 10 } },
+		{ S = "Boom", V = 0.72, P = 0.5, Fx = { Reverb = true, Bass = 6 } },
 		{ S = "Splash", V = 0.7, P = 1.6 },
 		{ S = "Whoosh", V = 0.6, P = 0.5 },
 	},
@@ -314,8 +318,8 @@ local CUES = {
 	},
 	Ultimate = {
 		{ S = "Rise", V = 0.8, P = 0.7, Fx = { Reverb = true } },
-		{ S = "Boom", V = 0.9, P = 0.45, D = 0.15, Fx = { Reverb = true, Bass = 10 } },
-		{ S = "Blip", Chord = { NOTE.C, NOTE.E, NOTE.G }, V = 0.35, D = 0.15, Fx = { Distort = 0.4, Reverb = true } },
+		{ S = "Boom", V = 0.9, P = 0.45, D = 0.15, Fx = { Reverb = true, Bass = 6 } },
+		{ S = "Blip", Chord = { NOTE.C, NOTE.E, NOTE.G }, V = 0.35, D = 0.15, Fx = { Distort = 0.2, Reverb = true } },
 	},
 	NoStamina = { { S = "Blip", Arp = { 0.8, 0.7 }, Gap = 0.06, V = 0.3 } },
 	EnemyWindup = {
@@ -333,8 +337,8 @@ local CUES = {
 		{ S = "Rise", V = 0.4, P = 1.3 },
 	},
 	PowerUp = {
-		{ S = "Boom", V = 0.9, P = 0.5, Fx = { Reverb = true, Bass = 10 } },
-		{ S = "Blip", Chord = { NOTE.C, NOTE.G, NOTE.C2 }, V = 0.4, D = 0.1, Fx = { Distort = 0.5 } },
+		{ S = "Boom", V = 0.9, P = 0.5, Fx = { Reverb = true, Bass = 6 } },
+		{ S = "Blip", Chord = { NOTE.C, NOTE.G, NOTE.C2 }, V = 0.4, D = 0.1, Fx = { Distort = 0.12 } },
 		{ S = "Blip", Arp = { NOTE.C2, NOTE.E2, NOTE.G2, NOTE.C3 }, Gap = 0.06, V = 0.4, D = 0.3 },
 	},
 	Potion = {
@@ -358,8 +362,42 @@ local function getGroup(name: string, volume: number): SoundGroup
 	end
 	return g
 end
-local sfxGroup = getGroup("GameSFX", 0.9)
-local musicGroup = getGroup("GameMusic", 0.45)
+local sfxGroup = getGroup("GameSFX", 0.55)
+local musicGroup = getGroup("GameMusic", 0.3)
+
+-- master bus: glue compressor + soft high cut (less harsh, more even)
+if not sfxGroup:FindFirstChild("BusCompressor") then
+	local comp = Instance.new("CompressorSoundEffect")
+	comp.Name = "BusCompressor"
+	comp.Threshold = -20
+	comp.Ratio = 3
+	comp.Attack = 0.01
+	comp.Release = 0.18
+	comp.GainMakeup = 0
+	comp.Parent = sfxGroup
+	local eq = Instance.new("EqualizerSoundEffect")
+	eq.Name = "BusEQ"
+	eq.LowGain = 1
+	eq.MidGain = 0
+	eq.HighGain = -4
+	eq.Parent = sfxGroup
+end
+
+-- minimum seconds between two plays of the same cue (default 0.03)
+local RATE = {
+	Hit = 0.05, HitBlade = 0.05, HitBlunt = 0.05, HitEnergy = 0.05, Crit = 0.09, Kill = 0.07,
+	Swing = 0.05, HeavySwing = 0.08, ScytheSwing = 0.06, Punch = 0.05, GunShot = 0.05, SpiritShot = 0.06, CeroShot = 0.05,
+	OrePickup = 0.06, RarePickup = 0.15, Coins = 0.1, PowerGain = 0.1, Sell = 0.2,
+	UIHover = 0.05, UIClick = 0.04, Telegraph = 0.2, EnemyWindup = 0.15, Hurt = 0.12, Stage = 0.2, Discover = 0.3,
+	StepStone = 0.05, StepGrass = 0.05, StepWood = 0.05, StepMetal = 0.05, StepSoft = 0.05,
+}
+-- per-cue trim on top of the layer volumes (loud, frequent cues pulled down)
+local TRIM = {
+	Hit = 0.8, HitBlade = 0.8, HitBlunt = 0.75, HitEnergy = 0.8, Swing = 0.85, Kill = 0.8,
+	BossSpawn = 0.7, BossKill = 0.75, Rebirth = 0.75, Overdrive = 0.7, Ultimate = 0.75, Telegraph = 0.6,
+	PowerGain = 0.7, OrePickup = 0.8, UIClick = 0.8, UIHover = 0.7,
+}
+local lastPlayed: { [string]: number } = {}
 
 function SFX.SetSFXVolume(v: number)
 	sfxGroup.Volume = v
@@ -482,8 +520,13 @@ function SFX.Play(name: string, opts)
 	if not cue then
 		return
 	end
+	local now = os.clock()
+	if now - (lastPlayed[name] or -1) < (RATE[name] or 0.03) then
+		return
+	end
+	lastPlayed[name] = now
 	opts = opts or {}
-	local volMul = opts.Volume or 1
+	local volMul = (opts.Volume or 1) * (TRIM[name] or 1)
 	local pitchMul = opts.Pitch or 1
 	local parent, temp = makeParent(opts.At)
 	local positional = parent ~= SoundService
@@ -564,7 +607,7 @@ function SFX.PlayMusic(assetId: number?)
 	s.SoundGroup = musicGroup
 	s.Parent = SoundService
 	s:Play()
-	TweenService:Create(s, TweenInfo.new(2), { Volume = 0.6 }):Play()
+	TweenService:Create(s, TweenInfo.new(2), { Volume = 0.45 }):Play()
 	currentMusic = s
 end
 

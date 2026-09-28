@@ -572,26 +572,6 @@ local function buildPlaza(map)
 	statue.Parent = hub
 	poi(holder, "Sword of Ascension", "Power", "Rebirth for x1.65 Power each, Ascend for x8.", "Hub", { Frame = 24, Travel = "Hub" })
 
-	---------------- ORE INDEX ----------------
-	local indexBoard, indexRows = board(hub, CFrame.lookAt(Vector3.new(-62, 1.6, 26), Vector3.new(0, 1.6, 10)), "ORE INDEX", Color3.fromRGB(120, 220, 255))
-	local lines = {}
-	for _, ore in ipairs(Config.Ores) do
-		table.insert(lines, string.format('<font color="#%s">%s</font> <font color="#aaaaaa">%s</font>', ore.Color:ToHex(), ore.Name, Config.Effects[ore.Effect].Name))
-	end
-	local body = Instance.new("TextLabel")
-	body.BackgroundTransparency = 1
-	body.Size = UDim2.fromScale(1, 1)
-	body.Font = Config.Fonts.Body
-	body.TextScaled = true
-	body.RichText = true
-	body.TextXAlignment = Enum.TextXAlignment.Left
-	body.TextYAlignment = Enum.TextYAlignment.Top
-	body.TextColor3 = Color3.new(1, 1, 1)
-	body.Text = table.concat(lines, "\n")
-	body.Parent = indexRows
-	map.IndexPrompt = prompt(indexBoard, "Open Index", "Ore Index", "IndexPrompt", "Index")
-	poi(indexBoard, "Ore Index", "Service", "Every ore and its weapon effect.", "Hub", { Frame = 0, Travel = "Hub" })
-
 	---------------- LEADERBOARDS (south arc) ----------------
 	map.Leaderboards = {}
 	for i, lb in ipairs(Config.Leaderboards) do
@@ -684,133 +664,59 @@ local function buildBossRush(map)
 	pp.HoldDuration = 0.4
 	map.TowerPrompt = pp
 	map.TowerCFrame = CFrame.new(c + Vector3.new(-30, 5, 0)) * CFrame.Angles(0, math.rad(-90), 0)
-	poi(gate, "Boss Rush", "Danger", "Fight bosses back to back. Opens after stage " .. Config.BossRush.StageReq .. ".", "BossRush", { Frame = 30, Travel = "Tower" })
+	poi(gate, "Boss Rush", "Danger", "Fight bosses back to back. Opens after the floor " .. Config.BossRush.StageReq .. " boss.", "BossRush", { Frame = 30, Travel = "Tower" })
 end
 
 ---------------------------------------------------------------------
--- THE PATH (north)
+-- THE DUNGEON GATE (north) - runs themselves are built per player by
+-- Server/DungeonService far below the lobby
 ---------------------------------------------------------------------
-local WALL_H = 7
-
-local function stageDecor(parent, zone, stageIndex: number, center: Vector3, len: number, rng: Random)
-	local half = W.PathWidth / 2
-	-- two or three simple props per stage, on the edges (keeps the road clear)
-	for _ = 1, 3 do
-		local side = rng:NextNumber() < 0.5 and -1 or 1
-		local x = side * rng:NextNumber(half - 12, half - 5)
-		local z = center.Z + rng:NextNumber(-len / 2 + 10, len / 2 - 10)
-		if zone.Id == 1 then
-			local h = rng:NextNumber(6, 14)
-			P(parent, { Name = "RuinPillar", Shape = Enum.PartType.Cylinder, Size = Vector3.new(h, 3, 3), CFrame = CFrame.new(x, h / 2, z) * FLAT, Color = zone.Wall, Material = Enum.Material.Marble })
-		elseif zone.Id == 2 then
-			local crate = P(parent, { Name = "Container", Size = Vector3.new(7, 6, 12), CFrame = CFrame.new(x, 3, z) * CFrame.Angles(0, rng:NextNumber(-0.3, 0.3), 0), Color = Color3.fromRGB(60, 70, 90), Material = Enum.Material.CorrodedMetal })
-			P(parent, { Name = "Stripe", Size = Vector3.new(7.1, 0.3, 12.1), CFrame = crate.CFrame * CFrame.new(0, 1.8, 0), Color = zone.Accent, Material = Enum.Material.Neon, CanCollide = false })
-		elseif zone.Id == 3 then
-			cherryTree(parent, Vector3.new(x, 0, z), rng:NextNumber(0.9, 1.2), rng)
-		elseif zone.Id == 4 then
-			local shard = P(parent, { Name = "StarShard", Size = Vector3.new(2, rng:NextNumber(5, 10), 2), CFrame = CFrame.new(x, 4, z) * CFrame.Angles(rng:NextNumber(-0.3, 0.3), rng:NextNumber(0, 3), rng:NextNumber(-0.3, 0.3)), Color = zone.Accent, Material = Enum.Material.Neon, CanCollide = false })
-			shard.Transparency = 0.2
-		elseif zone.Id == 5 then
-			P(parent, { Name = "IceSpire", Size = Vector3.new(3, rng:NextNumber(7, 14), 3), CFrame = CFrame.new(x, 4, z) * CFrame.Angles(0, rng:NextNumber(0, 3), rng:NextNumber(-0.2, 0.2)), Color = Color3.fromRGB(180, 220, 245), Material = Enum.Material.Glacier })
-		else
-			local obelisk = P(parent, { Name = "Obelisk", Size = Vector3.new(2.5, rng:NextNumber(8, 14), 2.5), CFrame = CFrame.new(x, 5, z), Color = zone.Wall, Material = Enum.Material.Basalt })
-			P(parent, { Name = "Rune", Size = Vector3.new(2.6, 0.4, 2.6), CFrame = obelisk.CFrame * CFrame.new(0, 2, 0), Color = zone.Accent, Material = Enum.Material.Neon, CanCollide = false })
-		end
-	end
-	local _ = stageIndex
-end
-
-local function gateArch(parent, z: number, zone, stage, stageIndex: number)
-	local half = W.PathWidth / 2
-	local h = stage.Boss and 30 or 22
+local function buildDungeonGate(map)
+	local g = folder("DungeonGate", root)
+	local c = W.DungeonGate
+	local violet = Color3.fromRGB(170, 110, 255)
+	bridge(g, Vector3.new(0, 1.2, -W.PlazaRadius + 2), Vector3.new(0, 1.2, c.Z + 24), 22, TRIM)
+	torii(g, CFrame.new(0, 1.2, -W.PlazaRadius - 6), 24, 18)
+	disc(g, c + Vector3.new(0, 0.5, 0), 56, 2, STONE_DARK, Enum.Material.Slate, "GatePlatform")
+	disc(g, c + Vector3.new(0, 1.6, 0), 50, 0.12, violet, Enum.Material.Neon, "GateGlow").Transparency = 0.65
 	for _, side in ipairs({ -1, 1 }) do
-		P(parent, { Name = "ArchPillar", Size = Vector3.new(4, h, 4), CFrame = CFrame.new(side * (half - 2), h / 2, z), Color = zone.Wall, Material = Enum.Material.Slate })
-		P(parent, { Name = "ArchGlow", Size = Vector3.new(0.4, h - 2, 4.2), CFrame = CFrame.new(side * (half - 4.2), h / 2, z), Color = zone.Accent, Material = Enum.Material.Neon, CanCollide = false })
+		local tower = P(g, { Name = "Tower", Size = Vector3.new(7, 40, 7), CFrame = CFrame.new(c + Vector3.new(side * 15, 20, -6)), Color = STONE, Material = Enum.Material.Cobblestone })
+		P(g, { Name = "TowerGlow", Size = Vector3.new(0.5, 34, 7.2), CFrame = tower.CFrame * CFrame.new(-side * 3.6, 0, 0), Color = violet, Material = Enum.Material.Neon, CanCollide = false })
+		local brazier = P(g, { Name = "Brazier", Shape = Enum.PartType.Ball, Size = Vector3.one * 2.6, CFrame = CFrame.new(c + Vector3.new(side * 15, 41.6, -6)), Color = violet, Material = Enum.Material.Neon, CanCollide = false })
+		emitter(brazier, "Fire", violet, 10)
+		CollectionService:AddTag(light(brazier, violet, 30, 1.6, true), "Flicker")
 	end
-	local lintel = P(parent, { Name = "Lintel", Size = Vector3.new(W.PathWidth, 5, 4), CFrame = CFrame.new(0, h + 2.5, z), Color = zone.Wall, Material = Enum.Material.Slate })
-	for _, face in ipairs({ Enum.NormalId.Front, Enum.NormalId.Back }) do
-		local sg = Instance.new("SurfaceGui")
-		sg.Face = face
-		sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-		sg.PixelsPerStud = 24
-		sg.LightInfluence = 0
-		sg.Parent = lintel
-		local t = Instance.new("TextLabel")
-		t.BackgroundTransparency = 1
-		t.Size = UDim2.fromScale(1, 1)
-		t.Font = Config.Fonts.Display
-		t.TextScaled = true
-		t.RichText = true
-		t.Text = string.format('STAGE %d  <font color="#ffffff">%s</font>', stageIndex, stage.Boss and ("BOSS: " .. stage.Enemy) or stage.Enemy)
-		t.TextColor3 = stage.Boss and Color3.fromRGB(255, 90, 110) or zone.Accent
-		t.Parent = sg
+	local lintel = P(g, { Name = "Lintel", Size = Vector3.new(40, 7, 9), CFrame = CFrame.new(c + Vector3.new(0, 36, -6)), Color = STONE_DARK, Material = Enum.Material.Slate })
+	local sg = Instance.new("SurfaceGui")
+	sg.Face = Enum.NormalId.Back
+	sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	sg.PixelsPerStud = 20
+	sg.LightInfluence = 0
+	sg.Parent = lintel
+	local t = Instance.new("TextLabel")
+	t.BackgroundTransparency = 1
+	t.Size = UDim2.fromScale(1, 1)
+	t.Font = Config.Fonts.Display
+	t.TextScaled = true
+	t.Text = "THE DUNGEON"
+	t.TextColor3 = Color3.fromRGB(230, 200, 255)
+	t.Parent = sg
+	-- the portal itself
+	local portal = P(g, { Name = "DungeonPortal", Size = Vector3.new(22, 30, 1), CFrame = CFrame.new(c + Vector3.new(0, 16.6, -6)), Color = Color3.fromRGB(60, 20, 110), Material = Enum.Material.Neon, CanCollide = false })
+	portal.Transparency = 0.15
+	emitter(portal, "Vortex", violet, 6)
+	emitter(portal, "Rise", violet, 6)
+	light(portal, violet, 40, 2.4, true)
+	for k = 1, 4 do
+		P(g, { Name = "Step", Size = Vector3.new(26, 0.8, 3), CFrame = CFrame.new(c + Vector3.new(0, 1.4 + k * 0.6, -1 - k * 1.4)), Color = STONE, Material = Enum.Material.Slate })
 	end
-	-- the gate itself (opened per player on their own client)
-	local gate = P(parent, { Name = "Gate_" .. stageIndex, Size = Vector3.new(W.PathWidth - 8, h, 1.2), CFrame = CFrame.new(0, h / 2, z), Color = stage.Boss and Color3.fromRGB(255, 60, 80) or zone.Accent, Material = Enum.Material.ForceField, Transparency = 0.15, CanCollide = true })
-	gate:SetAttribute("Stage", stageIndex)
-	CollectionService:AddTag(gate, "StageGate")
-	billboard(gate, stageIndex == 1 and "OPEN" or ("CLEAR STAGE " .. (stageIndex - 1)), nil, Color3.fromRGB(255, 240, 200), 0, 0.8, 14).Name = "GateLabel"
-	return gate
-end
-
-local function buildPath(map)
-	local path = folder("ThePath", root)
-	map.Path = { Stages = {} }
-	-- bridge from the plaza to the first gate
-	bridge(path, Vector3.new(0, 1.2, -W.PlazaRadius + 2), Vector3.new(0, 1.2, W.PathStartZ + 2), 22, TRIM)
-	torii(path, CFrame.new(0, 1.2, -W.PlazaRadius - 6), 26, 20) -- the path entrance
-	local half = W.PathWidth / 2
-	for i, stage in ipairs(Config.Stages) do
-		local zone = Config.Zones[stage.Zone]
-		local zStart, zEnd, center = Config.StageBounds(i)
-		local len = zStart - zEnd
-		local stageFolder = folder("Stage_" .. i, path)
-		local rng = Random.new(i * 97)
-		P(stageFolder, { Name = "Floor", Size = Vector3.new(W.PathWidth, 2, len), CFrame = CFrame.new(0, -1 + 1.6, center.Z), Color = zone.Floor, Material = zone.Id == 5 and Enum.Material.Snow or (zone.Id == 2 and Enum.Material.DiamondPlate or Enum.Material.Slate) })
-		for _, side in ipairs({ -1, 1 }) do
-			P(stageFolder, { Name = "Wall", Size = Vector3.new(3, WALL_H, len), CFrame = CFrame.new(side * (half + 1.5), WALL_H / 2, center.Z), Color = zone.Wall, Material = Enum.Material.Slate })
-			P(stageFolder, { Name = "WallTrim", Size = Vector3.new(3.2, 0.4, len), CFrame = CFrame.new(side * (half + 1.5), WALL_H, center.Z), Color = zone.Accent, Material = Enum.Material.Neon, CanCollide = false })
-			-- invisible upper wall keeps players on the road
-			P(stageFolder, { Name = "Barrier", Size = Vector3.new(2, 40, len), CFrame = CFrame.new(side * (half + 1.5), WALL_H + 20, center.Z), Transparency = 1 })
-		end
-		-- sconces with flickering, shadow-casting light
-		for z = zStart - 20, zEnd + 10, -40 do
-			for _, side in ipairs({ -1, 1 }) do
-				local flame = P(stageFolder, { Name = "Sconce", Shape = Enum.PartType.Ball, Size = Vector3.one * 1.1, CFrame = CFrame.new(side * (half - 0.2), WALL_H + 1.4, z), Color = zone.Accent, Material = Enum.Material.Neon, CanCollide = false, CastShadow = false })
-				CollectionService:AddTag(light(flame, zone.Accent, 24, 1.2, side == 1), "Flicker")
-			end
-		end
-		local gate = gateArch(stageFolder, zStart, zone, stage, i)
-		if stage.Boss then
-			local arena = disc(stageFolder, center + Vector3.new(0, 1.62, 0), 60, 0.1, Color3.fromRGB(255, 60, 80), Enum.Material.Neon, "BossArena")
-			arena.Transparency = 0.75
-			arena.CanCollide = false
-			poi(arena, "BOSS: " .. stage.Enemy, "Danger", "Stage " .. i .. " boss.", "S" .. i, { Frame = 0, Travel = "Stage_" .. i })
-		end
-		if (i - 1) % Config.StagesPerZone == 0 then
-			local titleHolder = P(stageFolder, { Name = "ZoneTitle", Size = Vector3.one, Transparency = 1, CanCollide = false, CFrame = CFrame.new(0, 12, zStart - 14) })
-			billboard(titleHolder, zone.Name, "Zone " .. zone.Id, zone.Accent, 0, 1.3, 30)
-		end
-		stageDecor(stageFolder, zone, i, center, len, rng)
-
-		local room = P(stageFolder, { Name = "Room_" .. i, Size = Vector3.new(W.PathWidth, 30, len), CFrame = CFrame.new(0, 15, center.Z), Transparency = 1, CanCollide = false, CanQuery = false, CanTouch = false })
-		room:SetAttribute("Stage", i)
-		room:SetAttribute("Zone", stage.Zone)
-		CollectionService:AddTag(room, "StageRoom")
-
-		map.Path.Stages[i] = {
-			Stage = stage,
-			Center = center + Vector3.new(0, 1.6, 0),
-			SpawnMin = Vector3.new(-half + 8, 1.6, zEnd + 8),
-			SpawnMax = Vector3.new(half - 8, 1.6, zStart - 14),
-			Entry = CFrame.new(0, 5, zStart - 8),
-			Gate = gate,
-			Room = room,
-		}
-	end
-	-- end wall
-	local _, lastEnd = Config.StageBounds(#Config.Stages)
-	P(path, { Name = "EndWall", Size = Vector3.new(W.PathWidth + 6, 40, 4), CFrame = CFrame.new(0, 20, lastEnd - 2), Color = STONE_DARK, Material = Enum.Material.Slate })
+	billboard(portal, "THE DUNGEON", "Floor after floor. Die and you start over!", Color3.fromRGB(220, 180, 255), 17, 1.2, 22)
+	local holder = P(g, { Name = "PromptHolder", Size = Vector3.one, Transparency = 1, CanCollide = false, CFrame = CFrame.new(c + Vector3.new(0, 4, 2)) })
+	local pp = prompt(holder, "Enter Dungeon", "The Dungeon", "DungeonPrompt", "Dungeon")
+	pp.MaxActivationDistance = 14
+	map.DungeonPrompt = pp
+	map.DungeonCFrame = CFrame.new(c + Vector3.new(0, 5, 18))
+	poi(holder, "The Dungeon", "Danger", "Endless floors, a boss every 5. Dying or going home starts you over, but checkpoints let you skip ahead.", "Dungeon", { Frame = 30, Travel = "Dungeon" })
 end
 
 ---------------------------------------------------------------------
@@ -826,20 +732,7 @@ local function buildAmbient(map)
 	petals.Acceleration = Vector3.new(1.5, -3, 0.8)
 	ambientVolume(amb, CFrame.new(W.TrainCenter + Vector3.new(0, 3, 0)), Vector3.new(110, 2, 110), "Fog", Color3.fromRGB(180, 220, 190), 3)
 	ambientVolume(amb, CFrame.new(W.BossRushCenter + Vector3.new(0, 6, 0)), Vector3.new(90, 8, 90), "FloatEmbers", Color3.fromRGB(200, 120, 255), 5)
-	for _, zone in ipairs(Config.Zones) do
-		local first = (zone.Id - 1) * Config.StagesPerZone + 1
-		local last = first + Config.StagesPerZone - 1
-		local zStart = Config.StageBounds(first)
-		local _, zEnd = Config.StageBounds(last)
-		local len = zStart - zEnd
-		local cf = CFrame.new(0, 3, (zStart + zEnd) / 2)
-		ambientVolume(amb, cf, Vector3.new(W.PathWidth - 4, 2, len), "Fog", zone.Tint:Lerp(zone.Accent, 0.2), 12)
-		ambientVolume(amb, cf + Vector3.new(0, 7, 0), Vector3.new(W.PathWidth - 4, 12, len), "Dust", zone.Accent:Lerp(Color3.new(1, 1, 1), 0.5), 12)
-		local special = ({ "Petals", "FloatEmbers", "Petals", "Stars", "Frost", "Void" })[zone.Id]
-		local e = ambientVolume(amb, cf + Vector3.new(0, 10, 0), Vector3.new(W.PathWidth - 4, 16, len), special, zone.Accent, 10)
-		e.Lifetime = NumberRange.new(3, 6)
-		e.Speed = NumberRange.new(0.5, 2)
-	end
+	ambientVolume(amb, CFrame.new(W.DungeonGate + Vector3.new(0, 6, -4)), Vector3.new(40, 10, 20), "Void", Color3.fromRGB(170, 110, 255), 6)
 	local _ = map
 end
 
@@ -858,7 +751,7 @@ function MapBuilder.Build()
 	buildPlaza(map)
 	buildTrain(map)
 	buildBossRush(map)
-	buildPath(map)
+	buildDungeonGate(map)
 	buildAmbient(map)
 	applyMaterialVariants(root)
 

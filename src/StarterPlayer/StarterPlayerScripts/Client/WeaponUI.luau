@@ -121,7 +121,28 @@ end
 ---------------------------------------------------------------------
 local function buildWeapons()
 	local p = H.MakePanel("Weapons", "WEAPONS", Vector2.new(820, 500), C.Purple)
-	local grid = H.Scroller(p.Body, { Size = UDim2.new(1, -300, 1, 0) })
+	local grid = H.Scroller(p.Body, { Size = UDim2.new(1, -300, 1, -46) })
+	-- QoL: bulk scrap
+	local bulk = H.Frame(p.Body, { Transparency = 1, Size = UDim2.new(1, -300, 0, 40), Position = UDim2.new(0, 0, 1, 0), AnchorPoint = Vector2.new(0, 1) })
+	H.List(bulk, 6, true, Enum.HorizontalAlignment.Left)
+	local armed = { [1] = 0, [2] = 0 }
+	for i, lvl in ipairs({ 1, 2 }) do
+		local label = lvl == 1 and "SCRAP ALL COMMON" or "SCRAP COMMON+UNCOMMON"
+		local b
+		b = UITheme.Button(bulk, { Text = label, Color = "Red", Size = UDim2.fromOffset(i == 1 and 180 or 240, 38), Order = i, MaxText = 14, Corner = 8, OnClick = function()
+			if os.clock() - armed[lvl] < 3 then
+				armed[lvl] = 0
+				UITheme.SetButtonText(b, label)
+				request("ScrapBulk", lvl)
+			else
+				armed[lvl] = os.clock()
+				UITheme.SetButtonText(b, "CLICK AGAIN")
+				task.delay(3, function()
+					UITheme.SetButtonText(b, label)
+				end)
+			end
+		end })
+	end
 	local g = Instance.new("UIGridLayout")
 	g.CellSize = UDim2.fromOffset(150, 78)
 	g.CellPadding = UDim2.fromOffset(8, 8)
@@ -170,6 +191,10 @@ local function buildWeapons()
 		else
 			table.insert(lines, '<font color="#8a86a0">No ore effects (forge one at the Soul Forge!)</font>')
 		end
+		-- skill mastery for this weapon type
+		local mxp = lastD and lastD.Mastery and lastD.Mastery[def.Class] or 0
+		local mlvl = Config.MasteryLevel(mxp)
+		table.insert(lines, 3, string.format('<font color="#ffc432">%s mastery Lv %d</font> (+%d%% skill dmg)', def.Class, mlvl, math.floor(mlvl * Config.Mastery.DamagePerLevel * 100 + 0.5)))
 		local info = UITheme.Label(detail, { Text = table.concat(lines, "\n"), Rich = true, Size = UDim2.new(1, -16, 0, 176), Position = UDim2.fromOffset(8, 192), XAlign = Enum.TextXAlignment.Left, MaxText = 15, StrokeThickness = 1 })
 		info.TextYAlignment = Enum.TextYAlignment.Top
 		info.TextWrapped = true
@@ -282,7 +307,7 @@ local function buildArmor()
 	local function showDetail(entry)
 		H.Clear(detail)
 		if not entry then
-			local t = UITheme.Label(detail, { Text = "No armor yet.\n\nArmor is a rare drop from Path enemies, elites, bosses and the Boss Rush.", Size = UDim2.new(1, -20, 0, 160), Position = UDim2.fromOffset(10, 20), Color = C.Sub, MaxText = 17 })
+			local t = UITheme.Label(detail, { Text = "No armor yet.\n\nArmor is a rare drop from dungeon enemies, elites, bosses and the Boss Rush.", Size = UDim2.new(1, -20, 0, 160), Position = UDim2.fromOffset(10, 20), Color = C.Sub, MaxText = 17 })
 			t.TextWrapped = true
 			return
 		end
@@ -363,7 +388,7 @@ local function buildArmor()
 	end
 end
 
-function WeaponUI.Reveal(weaponId: string, rarityId: string, title: string?, effects: { [string]: number }?)
+function WeaponUI.Reveal(weaponId: string, rarityId: string, title: string?, effects: { [string]: number }?, equipped: boolean?)
 	local def = Config.WeaponById[weaponId]
 	local r = rarityOf(rarityId)
 	if not def then
@@ -430,7 +455,7 @@ function WeaponUI.Reveal(weaponId: string, rarityId: string, title: string?, eff
 		task.wait(0.3)
 		cleanup()
 		overlay:Destroy()
-		UI.Notify("Forged " .. rarityLabel(r) .. " " .. def.Name .. "! Equip it from Weapons.", r.Color)
+		UI.Notify("Forged " .. rarityLabel(r) .. " " .. def.Name .. (equipped and " - equipped!" or "! Equip it from Weapons."), r.Color)
 	end)
 end
 

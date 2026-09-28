@@ -21,6 +21,7 @@ local C = UITheme.Colors
 local FORGE = Color3.fromRGB(255, 140, 60)
 
 local slots: { string } = {}
+local lastForged: { string } = {}
 local catalyst: string? = nil
 local showBook = false
 local panel = nil
@@ -136,7 +137,45 @@ local function build()
 			UI.Notify("Add at least one ore to the crucible.", C.Red)
 			return
 		end
+		lastForged = table.clone(slots)
 		request("Forge", { Ores = table.clone(slots), Catalyst = catalyst })
+	end })
+	-- QoL: refill the crucible with the last mix, or with your rarest ore
+	local qol = H.Frame(mid, { Transparency = 1, Size = UDim2.new(1, 0, 0, 34), Position = UDim2.fromOffset(0, 262) })
+	H.List(qol, 6, true)
+	UITheme.Button(qol, { Text = "REPEAT LAST", Color = "Blue", Size = UDim2.new(0.5, -3, 1, 0), Order = 1, MaxText = 14, Corner = 8, OnClick = function()
+		local d = UI.Data
+		if not d or #lastForged == 0 then
+			UI.Notify("Forge something first.", C.Red)
+			return
+		end
+		local need = {}
+		for _, id in ipairs(lastForged) do
+			need[id] = (need[id] or 0) + 1
+		end
+		for id, n in pairs(need) do
+			if (d.Backpack[id] or 0) < n then
+				UI.Notify("Not enough ore for the last mix.", C.Red)
+				return
+			end
+		end
+		slots = table.clone(lastForged)
+		p.Sig = nil
+		p.Refresh(d)
+	end })
+	UITheme.Button(qol, { Text = "AUTO-FILL", Color = "Purple", Size = UDim2.new(0.5, -3, 1, 0), Order = 2, MaxText = 14, Corner = 8, OnClick = function()
+		local d = UI.Data
+		if not d then
+			return
+		end
+		for i = #Config.Ores, 1, -1 do
+			local ore = Config.Ores[i]
+			while #slots < Config.Forge.Slots and used(ore.Id) < (d.Backpack[ore.Id] or 0) do
+				table.insert(slots, ore.Id)
+			end
+		end
+		p.Sig = nil
+		p.Refresh(d)
 	end })
 	local costLabel = UITheme.Label(mid, { Text = "", Size = UDim2.new(1, 0, 0, 20), Position = UDim2.new(0, 0, 1, -18), Color = C.Gold, MaxText = 16 })
 
@@ -274,7 +313,7 @@ local function build()
 			end
 		end
 		if not any then
-			local t = UITheme.Label(oreGrid, { Text = "No ore left. Clear Path stages to find more!", Size = UDim2.fromOffset(280, 60), Color = C.Sub, MaxText = 15 })
+			local t = UITheme.Label(oreGrid, { Text = "No ore left. Clear dungeon floors to find more!", Size = UDim2.fromOffset(280, 60), Color = C.Sub, MaxText = 15 })
 			t.TextWrapped = true
 		end
 

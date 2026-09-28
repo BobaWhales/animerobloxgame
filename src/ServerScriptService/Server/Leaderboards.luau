@@ -23,7 +23,7 @@ local function valueOf(key: string, data): number
 	if key == "Power" then
 		return data.Power
 	elseif key == "Stage" then
-		return data.Stage
+		return data.BestFloor or 0
 	elseif key == "Prestige" then
 		-- ascensions dominate, then rebirths
 		return data.Ascensions * 100000 + data.Rebirths
@@ -44,7 +44,7 @@ local function display(lb, stored: number): string
 	if lb.Log then
 		return Format.Abbrev(10 ^ (stored / 1000))
 	elseif lb.Key == "Stage" then
-		return "Stage " .. stored
+		return "Floor " .. stored
 	elseif lb.Key == "Prestige" then
 		local asc = math.floor(stored / 100000)
 		local reb = stored % 100000

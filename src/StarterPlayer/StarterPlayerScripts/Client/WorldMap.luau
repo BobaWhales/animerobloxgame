@@ -10,12 +10,12 @@
 --     (saved per player via the "Explore" request).
 --   * Minimal waypoints: small colour-coded geometric symbols
 --     (diamond = service, square = power, ring = travel, red diamond =
---     boss, outlined square = stage) that expand into a detailed callout on
+--     danger) that expand into a detailed callout on
 --     hover / tap, with Track (world marker) and Travel buttons.
 -- Controls: drag / WASD / left stick to pan, wheel / pinch / Q-E / LB-RB to
--- zoom, M to close. Layout: spawn plaza in the middle, Training Grounds to
--- the west, the Boss Rush island to the east and the 30-stage Path running
--- north (drawn compressed so the whole run fits).
+-- zoom, M to close. Layout: the lobby - spawn plaza in the middle, the
+-- Dungeon Gate to the north, Training Grounds west, Boss Rush east. Dungeon
+-- runs are private and far away, so they show up at the gate.
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -26,7 +26,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("GameShared")
 local Config = require(Shared:WaitForChild("Config"))
-local Format = require(Shared:WaitForChild("Format"))
 local SFX = require(Shared:WaitForChild("SFX"))
 
 local WorldMap = {}
@@ -40,14 +39,10 @@ local data = nil
 ---------------------------------------------------------------------
 -- LAYOUT (map units; 1 unit = 1 px at zoom 1)
 ---------------------------------------------------------------------
-local OW = 2 -- map units per stud around spawn (plaza, training, boss rush)
-local PX = 1.2 -- map units per stud across the Path
-local PZ = 0.5 -- map units per stud along the Path (it is ~3000 studs long)
+local OW = 2 -- map units per stud in the lobby
 local W = Config.World
-local PATH_TOP = W.PathStartZ * OW -- map y where the first gate sits
-local PATH_END_Z = select(2, Config.StageBounds(#Config.Stages))
-local PATH_BOTTOM = PATH_TOP + (PATH_END_Z - W.PathStartZ) * PZ
-local BOUNDS_MIN = Vector2.new(-700, PATH_BOTTOM - 160)
+local GATE_MAP = Vector2.new(W.DungeonGate.X * OW, W.DungeonGate.Z * OW)
+local BOUNDS_MIN = Vector2.new(-700, GATE_MAP.Y - 200)
 local BOUNDS_MAX = Vector2.new(700, 320)
 local TRAIN_MAP = Vector2.new(W.TrainCenter.X * OW, W.TrainCenter.Z * OW)
 local RUSH_MAP = Vector2.new(W.BossRushCenter.X * OW, W.BossRushCenter.Z * OW)
@@ -175,49 +170,15 @@ end
 ---------------------------------------------------------------------
 -- COORDINATES
 ---------------------------------------------------------------------
-local function onPath(pos: Vector3): boolean
-	return pos.Z < W.PathStartZ + 2 and math.abs(pos.X) < W.PathWidth / 2 + 12
-end
-
 local function worldToMap(pos: Vector3): Vector2
-	if onPath(pos) then
-		return Vector2.new(pos.X * PX, PATH_TOP + (pos.Z - W.PathStartZ) * PZ)
-	end
 	if pos.X > 2000 then
 		-- private Boss Rush arenas live far away; show them at the island
 		return RUSH_MAP
+	elseif pos.X < -2000 then
+		-- private dungeon runs live far below; show them at the gate
+		return GATE_MAP
 	end
 	return Vector2.new(pos.X * OW, pos.Z * OW)
-end
-
--- Map rect { x, y, w, h } of stage i on the Path.
-local function stageRect(i: number)
-	local zStart, zEnd = Config.StageBounds(i)
-	local top = PATH_TOP + (zEnd - W.PathStartZ) * PZ
-	local h = (zStart - zEnd) * PZ
-	local w = W.PathWidth * PX
-	return { -w / 2, top, w, h }
-end
-
-local function stageWorldCenter(stageIndex: number): Vector3?
-	if not Config.Stages[stageIndex] then
-		return nil
-	end
-	local _, _, center = Config.StageBounds(stageIndex)
-	return center + Vector3.new(0, 3, 0)
-end
-
-local function stageAt(pos: Vector3): number?
-	if not onPath(pos) then
-		return nil
-	end
-	for i in ipairs(Config.Stages) do
-		local zStart, zEnd = Config.StageBounds(i)
-		if pos.Z <= zStart and pos.Z > zEnd then
-			return i
-		end
-	end
-	return nil
 end
 
 ---------------------------------------------------------------------
@@ -330,10 +291,7 @@ local function drawBackground()
 	rings(0, 0, 170, 560, 46, 0.84)
 	rings(TRAIN_MAP.X, TRAIN_MAP.Y, 120, 260, 45, 0.88)
 	rings(RUSH_MAP.X, RUSH_MAP.Y, 120, 260, 45, 0.88)
-	for z = 1, #Config.Zones do
-		local first = stageRect((z - 1) * Config.StagesPerZone + 1)
-		rings(0, first[2] + first[4] - 180, 240, 420, 60, 0.9)
-	end
+	rings(GATE_MAP.X, GATE_MAP.Y, 90, 220, 45, 0.88)
 end
 
 local function region(parent, rect, fill: Color3, edge: Color3, r: number?)
@@ -354,10 +312,10 @@ local function drawWorld()
 	stroke(core, Color3.fromRGB(255, 140, 60), 1, 0.45)
 	text(w, 0, W.PlazaRadius * OW + 18, "SPAWN", 13, COL.Text, Config.Fonts.Display).TextTransparency = 0.2
 
-	-- bridges: plaza -> training (west), boss rush (east), the Path (north)
+	-- bridges: plaza -> training (west), boss rush (east), dungeon gate (north)
 	frame(w, TRAIN_MAP.X + 60 * OW, -6 * OW, (-W.PlazaRadius * OW) - (TRAIN_MAP.X + 60 * OW), 12 * OW, path, 0.2)
 	frame(w, W.PlazaRadius * OW, -6 * OW, RUSH_MAP.X - 50 * OW - W.PlazaRadius * OW, 12 * OW, path, 0.2)
-	frame(w, -11 * OW, PATH_TOP, 22 * OW, -W.PlazaRadius * OW - PATH_TOP, path, 0.2)
+	frame(w, -11 * OW, GATE_MAP.Y + 24 * OW, 22 * OW, -W.PlazaRadius * OW - GATE_MAP.Y - 24 * OW, path, 0.2)
 
 	-- training grounds
 	local train = { TRAIN_MAP.X - 60 * OW, TRAIN_MAP.Y - 50 * OW, 120 * OW, 100 * OW }
@@ -376,44 +334,30 @@ local function drawWorld()
 	stroke(rush, COL.Danger, 1.5, 0.3)
 	text(w, RUSH_MAP.X, RUSH_MAP.Y + 46 * OW + 16, "BOSS RUSH", 12, COL.Text, Config.Fonts.Display).TextTransparency = 0.25
 
-	-- the Path: one strip per stage, zone headers, boss arenas in red
-	for i, stage in ipairs(Config.Stages) do
-		local zone = Config.Zones[stage.Zone]
-		local rr = stageRect(i)
-		region(w, rr, stage.Boss and Color3.fromRGB(40, 16, 30) or COL.Land, stage.Boss and COL.Danger or zone.Accent, 4)
-		local n = text(w, rr[1] + rr[3] + 16, rr[2] + rr[4] / 2, tostring(i), 11, stage.Boss and COL.Danger or zone.Accent, Config.Fonts.Heading)
-		n.TextTransparency = 0.3
-		if (i - 1) % Config.StagesPerZone == 0 then
-			text(w, rr[1] - 14, rr[2] + rr[4] / 2, zone.Name:upper(), 12, zone.Accent, Config.Fonts.Display, Vector2.new(1, 0.5))
-		end
-	end
-
-	-- route line down the middle of the Path
-	dotted(w, Vector2.new(0, PATH_TOP), Vector2.new(0, PATH_BOTTOM), 22, 3, COL.Edge, 0.55)
+	-- the dungeon gate
+	local gate = circle(w, GATE_MAP.X, GATE_MAP.Y, 28 * OW, COL.Land2, 0.1)
+	stroke(gate, Color3.fromRGB(170, 110, 255), 2, 0.2)
+	local portal = frame(w, GATE_MAP.X - 11 * OW, GATE_MAP.Y - 6 * OW, 22 * OW, 3 * OW, Color3.fromRGB(170, 110, 255), 0.2)
+	portal.Name = "Portal"
+	text(w, GATE_MAP.X, GATE_MAP.Y - 28 * OW - 16, "THE DUNGEON", 13, Color3.fromRGB(220, 190, 255), Config.Fonts.Display).TextTransparency = 0.15
+	dotted(w, Vector2.new(0, 0), GATE_MAP, 22, 3, COL.Edge, 0.6)
 
 	-- fog over everything that can be explored
 	addFog("Train", { train[1] - 20, train[2] - 30, train[3] + 40, train[4] + 70 }, "UNCHARTED")
 	addFog("BossRush", { RUSH_MAP.X - 110, RUSH_MAP.Y - 110, 220, 250 }, "UNCHARTED")
-	for i, stage in ipairs(Config.Stages) do
-		local rr = stageRect(i)
-		addFog("S" .. i, { rr[1] - 14, rr[2], rr[3] + 28, rr[4] }, stage.Boss and "?" or nil)
-	end
 end
 
 ---------------------------------------------------------------------
 -- ICONS + CALLOUT
 ---------------------------------------------------------------------
-local function stageStatus(stageIndex: number): (boolean, string)
-	local stage = Config.Stages[stageIndex]
-	if not stage or not data then
-		return false, ""
+local function dungeonStatus(): (boolean, string)
+	if not data then
+		return true, ""
 	end
-	if data.Stage >= stageIndex then
-		return true, "Cleared"
-	elseif data.Stage == stageIndex - 1 then
-		return true, "Current stage - " .. math.min(data.StageKills or 0, stage.Kills) .. "/" .. stage.Kills .. " KOs"
+	if data.Run then
+		return true, "In a run: floor " .. data.Run.Floor
 	end
-	return false, "Clear stage " .. (stageIndex - 1) .. " to open"
+	return true, "Deepest floor: " .. (data.BestFloor or 0)
 end
 
 local function shapeFor(kind: string, color: Color3, parent: Instance)
@@ -464,9 +408,9 @@ local function showCallout(icon)
 	CO.Kind.TextColor3 = icon.Color
 	CO.Desc.Text = icon.Desc or ""
 	local statusText, statusColor = "", COL.Text
-	if icon.Stage then
-		local ok, st = stageStatus(icon.Stage)
-		statusText, statusColor = st, ok and Color3.fromRGB(130, 255, 160) or Color3.fromRGB(255, 120, 120)
+	if icon.Region == "Dungeon" then
+		local ok, st = dungeonStatus()
+		statusText, statusColor = st, ok and Color3.fromRGB(200, 170, 255) or Color3.fromRGB(255, 120, 120)
 	elseif icon.WorldPos then
 		local char = player.Character
 		local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -571,22 +515,7 @@ local function addIcon(opts)
 end
 
 local function recolorStages()
-	for _, icon in ipairs(icons) do
-		if icon.Stage then
-			local ok = stageStatus(icon.Stage)
-			local stage = Config.Stages[icon.Stage]
-			local zone = Config.Zones[stage.Zone]
-			local col = stage.Boss and COL.Danger or (ok and (zone.Accent or COL.Stage) or COL.Locked)
-			icon.Color = col
-			for _, d in ipairs(icon.Shape:GetDescendants()) do
-				if d:IsA("Frame") and d.Name == "Main" then
-					d.BackgroundColor3 = col
-				elseif d:IsA("UIStroke") and d.Parent and d.Parent.Name == "Main" then
-					d.Color = col
-				end
-			end
-		end
-	end
+	-- (kept for the Update hook; lobby icons have fixed colours)
 end
 
 local function buildIcons()
@@ -596,9 +525,8 @@ local function buildIcons()
 			return
 		end
 		local kind = part:GetAttribute("POIKind")
-		local region = part:GetAttribute("Region")
-		if not kind or (kind == "Danger" and type(region) == "string" and region:match("^S%d")) then
-			return -- stage boss arenas are drawn from the stage list below
+		if not kind then
+			return
 		end
 		addIcon({
 			Name = part:GetAttribute("POIName") or part.Name,
@@ -615,23 +543,6 @@ local function buildIcons()
 		fromPoi(part)
 	end
 	CollectionService:GetInstanceAddedSignal("POI"):Connect(fromPoi)
-	-- Path stages
-	for stageIndex, stage in ipairs(Config.Stages) do
-		local wp = stageWorldCenter(stageIndex)
-		if wp then
-			addIcon({
-				Name = (stage.Boss and "BOSS: " or "Stage " .. stageIndex .. ": ") .. stage.Enemy,
-				Kind = stage.Boss and "Danger" or "Stage",
-				Desc = stage.Boss and ("Stage " .. stageIndex .. " boss. Rare ore, catalysts and armor.") or ("KO " .. stage.Kills .. " to open the next gate. " .. Format.Abbrev(stage.Coins) .. " Coins + ore per kill."),
-				Region = "S" .. stageIndex,
-				Travel = "Stage_" .. stageIndex,
-				WorldPos = wp,
-				Map = worldToMap(wp),
-				Color = COL.Stage,
-				Stage = stageIndex,
-			})
-		end
-	end
 	recolorStages()
 end
 
@@ -971,12 +882,8 @@ local function markExplored(key: string, announce: boolean)
 		if UI then
 			local r = regions[key]
 			local name = key
-			if key:sub(1, 1) == "S" then
-				local st = Config.Stages[tonumber(key:sub(2)) or 0]
-				name = st and ("Stage " .. key:sub(2) .. ": " .. st.Enemy) or key
-			elseif key:sub(1, 1) == "Z" then
-				local z = Config.Zones[tonumber(key:sub(2)) or 0]
-				name = z and z.Name or key
+			if key == "Dungeon" then
+				name = "The Dungeon"
 			elseif key == "Train" then
 				name = "Training Grounds"
 			elseif key == "BossRush" then
@@ -991,10 +898,8 @@ end
 
 local function currentRegions(pos: Vector3): { string }
 	local out = {}
-	local i = stageAt(pos)
-	if i then
-		table.insert(out, "S" .. i)
-		table.insert(out, "Z" .. Config.Stages[i].Zone)
+	if pos.X < -2000 or (Vector3.new(pos.X, 0, pos.Z) - W.DungeonGate).Magnitude < 40 then
+		table.insert(out, "Dungeon")
 		return out
 	end
 	if pos.X > 2000 or (Vector3.new(pos.X, 0, pos.Z) - W.BossRushCenter).Magnitude < 70 then
@@ -1314,8 +1219,7 @@ function WorldMap.Init(ui, requestFn)
 	legendChip(legend, 0, "Service", "Service")
 	legendChip(legend, 90, "Power", "Power")
 	legendChip(legend, 170, "Travel", "Travel")
-	legendChip(legend, 250, "Stage", "Stage")
-	legendChip(legend, 330, "Danger", "Boss")
+	legendChip(legend, 250, "Danger", "Danger")
 
 	roundButton(gui, "X", UDim2.new(1, -24, 0, 60), WorldMap.Close)
 	roundButton(gui, "+", UDim2.new(1, -24, 1, -110), function()

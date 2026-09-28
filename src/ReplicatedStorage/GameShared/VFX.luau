@@ -595,8 +595,13 @@ local function arcAttachment(holder: BasePart, radius: number, angle: number): A
 	return a
 end
 
-function VFX.Slash(origin: CFrame, color: Color3, scale, flip: boolean?)
+-- Crisp crescent slash. A second, slightly smaller "echo" crescent trails a
+-- beat behind and sparks fly off the end of the arc (arena-style swings).
+function VFX.Slash(origin: CFrame, color: Color3, scale, flip: boolean?, echo: boolean?)
 	scale = scale or 1
+	if not echo then
+		task.delay(0.035, VFX.Slash, origin, color:Lerp(WHITE, 0.35), scale * 0.82, flip, true)
+	end
 	local radius = 6 * scale
 	local half = math.rad(75)
 	local roll = math.rad(math.random(-30, 30))
@@ -636,8 +641,11 @@ function VFX.Slash(origin: CFrame, color: Color3, scale, flip: boolean?)
 	mk(a0, am, 0.02, w * 0.35, CS(WHITE), 6)
 	mk(am, a1, w * 0.35, 0.02, CS(WHITE), 6)
 
+	if not echo then
+		VFX.Emit((holder.CFrame * a1.CFrame).Position, "Sparks", 6, color)
+	end
 	local start = os.clock()
-	local life = 0.24
+	local life = echo and 0.18 or 0.22
 	local startCF = holder.CFrame
 	local conn
 	conn = RunService.RenderStepped:Connect(function()
@@ -649,7 +657,7 @@ function VFX.Slash(origin: CFrame, color: Color3, scale, flip: boolean?)
 		end
 		local ease = 1 - (1 - t) ^ 3
 		holder.CFrame = startCF * CFrame.Angles(0, -math.rad(70) * ease, 0)
-		local tr = NS(0, math.min(1, t * 1.6), 1, math.min(1, t * 0.6 + 0.2))
+		local tr = NS(0, math.min(1, t * 1.6 + (echo and 0.35 or 0)), 1, math.min(1, t * 0.6 + 0.2))
 		for _, b in ipairs(beams) do
 			b.Transparency = tr
 		end
@@ -669,12 +677,18 @@ function VFX.HitSpark(pos: Vector3, color: Color3, crit: boolean?)
 	end
 end
 
+-- Player settings (Client/UI Settings panel).
+VFX.Settings = { Shake = true, DamageNumbers = true }
+
 function VFX.DamageNumber(pos: Vector3, amount: number, crit: boolean?, color: Color3?)
+	if not VFX.Settings.DamageNumbers then
+		return
+	end
 	local a = Instance.new("Attachment")
 	a.WorldPosition = pos
 	a.Parent = workspace.Terrain
 	local bb = Instance.new("BillboardGui")
-	bb.Size = UDim2.fromOffset(crit and 220 or 160, crit and 70 or 50)
+	bb.Size = UDim2.fromOffset(crit and 110 or 80, crit and 32 or 24)
 	bb.AlwaysOnTop = true
 	bb.LightInfluence = 0
 	bb.MaxDistance = 120
@@ -690,7 +704,7 @@ function VFX.DamageNumber(pos: Vector3, amount: number, crit: boolean?, color: C
 	label.TextColor3 = color or (crit and Color3.fromRGB(255, 215, 60) or WHITE)
 	label.Parent = bb
 	local stroke = Instance.new("UIStroke")
-	stroke.Thickness = crit and 3 or 2
+	stroke.Thickness = crit and 2 or 1.5
 	stroke.Color = crit and Color3.fromRGB(120, 30, 0) or Color3.fromRGB(20, 20, 30)
 	stroke.Parent = label
 	local grad = Instance.new("UIGradient")
@@ -700,11 +714,11 @@ function VFX.DamageNumber(pos: Vector3, amount: number, crit: boolean?, color: C
 	local sc = Instance.new("UIScale")
 	sc.Scale = 0.2
 	sc.Parent = label
-	tween(sc, 0.12, { Scale = crit and 1.35 or 1.1 }, Enum.EasingStyle.Back)
+	tween(sc, 0.12, { Scale = crit and 1.25 or 1.08 }, Enum.EasingStyle.Back)
 	task.delay(0.12, function()
 		tween(sc, 0.15, { Scale = 1 })
 	end)
-	tween(bb, 0.9, { StudsOffset = bb.StudsOffset + Vector3.new(0, crit and 5 or 4, 0) }, Enum.EasingStyle.Quart)
+	tween(bb, 0.8, { StudsOffset = bb.StudsOffset + Vector3.new(0, crit and 3.5 or 2.5, 0) }, Enum.EasingStyle.Quart)
 	task.delay(0.5, function()
 		tween(label, 0.4, { TextTransparency = 1 })
 		tween(stroke, 0.4, { Transparency = 1 })
@@ -719,7 +733,7 @@ function VFX.TextPop(pos: Vector3, text: string, color: Color3, size)
 	a.WorldPosition = pos
 	a.Parent = workspace.Terrain
 	local bb = Instance.new("BillboardGui")
-	bb.Size = UDim2.fromOffset(240 * size, 44 * size)
+	bb.Size = UDim2.fromOffset(140 * size, 22 * size)
 	bb.AlwaysOnTop = true
 	bb.LightInfluence = 0
 	bb.MaxDistance = 100
@@ -735,10 +749,10 @@ function VFX.TextPop(pos: Vector3, text: string, color: Color3, size)
 	label.TextColor3 = color
 	label.Parent = bb
 	local stroke = Instance.new("UIStroke")
-	stroke.Thickness = 2
+	stroke.Thickness = 1.5
 	stroke.Color = Color3.fromRGB(15, 15, 25)
 	stroke.Parent = label
-	tween(bb, 1, { StudsOffset = Vector3.new(0, 5, 0) }, Enum.EasingStyle.Quart)
+	tween(bb, 1, { StudsOffset = Vector3.new(0, 3.5, 0) }, Enum.EasingStyle.Quart)
 	task.delay(0.6, function()
 		tween(label, 0.4, { TextTransparency = 1 })
 		tween(stroke, 0.4, { Transparency = 1 })
@@ -923,12 +937,16 @@ function VFX.SetFovOffset(key: string, amount: number)
 end
 
 function VFX.Shake(amount: number)
-	shakeTrauma = math.min(1, shakeTrauma + amount)
+	if VFX.Settings.Shake then
+		shakeTrauma = math.min(1, shakeTrauma + amount)
+	end
 end
 
 -- Low-frequency rumble for heavy impacts (slams, big kills, ultimates).
 function VFX.Rumble(amount: number)
-	rumble = math.min(1, rumble + amount)
+	if VFX.Settings.Shake then
+		rumble = math.min(1, rumble + amount)
+	end
 end
 
 function VFX.FOVPunch(amount: number)
@@ -1022,76 +1040,75 @@ function VFX.ImpactFrame(color: Color3?, strength)
 	VFX.FOVPunch(-8 * strength)
 end
 
--- Big dramatic banner ("OVERDRIVE!", "NEW TIER", race reveals...).
+-- Compact announcement chip ("OVERDRIVE!", "FLOOR 10", race reveals...).
+-- Deliberately small: a slim pill under the top bar that slides in and out;
+-- a new card replaces the previous one instead of stacking.
+local currentCard: Frame? = nil
 function VFX.TitleCard(title: string, subtitle: string?, color, duration)
 	if not screenGui then
 		return
 	end
 	color = color or Color3.fromRGB(255, 200, 60)
 	duration = duration or 1.6
-	local band = Instance.new("Frame")
-	band.AnchorPoint = Vector2.new(0.5, 0.5)
-	band.Position = UDim2.fromScale(-0.6, 0.38)
-	band.Size = UDim2.new(1.4, 0, 0, 120)
-	band.Rotation = -4
-	band.BackgroundColor3 = Color3.fromRGB(12, 12, 20)
-	band.BackgroundTransparency = 0.1
-	band.BorderSizePixel = 0
-	band.ZIndex = 30
-	band.Parent = screenGui
-	local grad = Instance.new("UIGradient")
-	grad.Transparency = NS(0, 1, 0.2, 0.1, 0.8, 0.1, 1, 1)
-	grad.Parent = band
-	for _, y in ipairs({ 0, 1 }) do
-		local stripe = Instance.new("Frame")
-		stripe.AnchorPoint = Vector2.new(0, y)
-		stripe.Position = UDim2.fromScale(0, y)
-		stripe.Size = UDim2.new(1, 0, 0, 6)
-		stripe.BackgroundColor3 = color
-		stripe.BorderSizePixel = 0
-		stripe.ZIndex = 31
-		stripe.Parent = band
+	if currentCard then
+		currentCard:Destroy()
 	end
+	local card = Instance.new("Frame")
+	card.AnchorPoint = Vector2.new(0.5, 0)
+	card.Position = UDim2.new(0.5, 0, 0.24, 0)
+	card.Size = UDim2.fromOffset(300, subtitle and 42 or 30)
+	card.BackgroundColor3 = Color3.fromRGB(10, 10, 18)
+	card.BackgroundTransparency = 0.25
+	card.BorderSizePixel = 0
+	card.ZIndex = 30
+	card.Parent = screenGui
+	currentCard = card
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = card
+	local cst = Instance.new("UIStroke")
+	cst.Thickness = 1.5
+	cst.Color = color
+	cst.Transparency = 0.3
+	cst.Parent = card
 	local t = Instance.new("TextLabel")
 	t.BackgroundTransparency = 1
-	t.AnchorPoint = Vector2.new(0.5, 0.5)
-	t.Position = UDim2.fromScale(0.5, subtitle and 0.42 or 0.5)
-	t.Size = UDim2.new(0.6, 0, 0, 72)
+	t.Position = UDim2.fromOffset(10, 3)
+	t.Size = UDim2.new(1, -20, 0, subtitle and 22 or 24)
 	t.Font = Config.Fonts.Display
 	t.TextScaled = true
 	t.Text = title
 	t.TextColor3 = color
 	t.ZIndex = 32
-	t.Parent = band
+	t.Parent = card
 	local st = Instance.new("UIStroke")
-	st.Thickness = 4
+	st.Thickness = 1.5
 	st.Color = Color3.new(0, 0, 0)
 	st.Parent = t
-	local tg = Instance.new("UIGradient")
-	tg.Color = ColorSequence.new(WHITE, color)
-	tg.Rotation = 90
-	tg.Parent = t
 	if subtitle then
 		local s = Instance.new("TextLabel")
 		s.BackgroundTransparency = 1
-		s.AnchorPoint = Vector2.new(0.5, 0)
-		s.Position = UDim2.fromScale(0.5, 0.72)
-		s.Size = UDim2.new(0.6, 0, 0, 26)
+		s.Position = UDim2.fromOffset(10, 25)
+		s.Size = UDim2.new(1, -20, 0, 13)
 		s.Font = Config.Fonts.Body
 		s.TextScaled = true
 		s.Text = subtitle
-		s.TextColor3 = WHITE
+		s.TextColor3 = Color3.fromRGB(220, 220, 230)
 		s.ZIndex = 32
-		s.Parent = band
+		s.Parent = card
 	end
-	tween(band, 0.28, { Position = UDim2.fromScale(0.5, 0.38) }, Enum.EasingStyle.Back)
 	local sc = Instance.new("UIScale")
-	sc.Scale = 1.4
-	sc.Parent = t
-	tween(sc, 0.35, { Scale = 1 }, Enum.EasingStyle.Back)
+	sc.Scale = 0.6
+	sc.Parent = card
+	tween(sc, 0.25, { Scale = 1 }, Enum.EasingStyle.Back)
 	task.delay(duration, function()
-		tween(band, 0.25, { Position = UDim2.fromScale(1.6, 0.38) }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-		Debris:AddItem(band, 0.3)
+		if card.Parent then
+			tween(sc, 0.18, { Scale = 0 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+			Debris:AddItem(card, 0.2)
+		end
+		if currentCard == card then
+			currentCard = nil
+		end
 	end)
 end
 

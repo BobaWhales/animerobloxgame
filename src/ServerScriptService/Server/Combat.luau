@@ -222,9 +222,9 @@ end
 
 local function notifyBlocked(player: Player, s, e)
 	local t = os.clock()
-	if e.StageIndex and t - (s.LastBlockedNotify or 0) > 3 then
+	if e.Owner and e.Owner ~= player and t - (s.LastBlockedNotify or 0) > 3 then
 		s.LastBlockedNotify = t
-		Net.Notify(player, "Stage " .. e.StageIndex .. " is locked. Clear stage " .. (e.StageIndex - 1) .. " first!", Color3.fromRGB(255, 120, 90), "Error")
+		Net.Notify(player, "That enemy belongs to someone else's fight.", Color3.fromRGB(255, 120, 90), "Error")
 	end
 end
 
@@ -546,8 +546,21 @@ local function castSkill(player: Player, slot: string, payload, charge: number?)
 		Net.FX(player, "AbilityFail", { Slot = slot })
 		return
 	end
-	if not spendStamina(player, s, Stats.StaminaCost(player, skill.Stamina)) then
+	-- skill mastery: more damage, Adept+ = bigger area, Expert+ = cheaper
+	local mastery = Stats.MasteryLevel(player, def.Class)
+	local M = Config.Mastery
+	local staminaCost = Stats.StaminaCost(player, skill.Stamina) * (mastery >= M.Milestones[2].Level and 0.8 or 1)
+	if not spendStamina(player, s, staminaCost) then
 		return
+	end
+	skill = table.clone(skill)
+	skill.Damage = (skill.Damage or 1) * Stats.MasteryDamage(mastery)
+	if mastery >= M.Milestones[1].Level then
+		for _, key in ipairs({ "Range", "Radius", "Width", "Distance" }) do
+			if type(skill[key]) == "number" then
+				skill[key] *= 1.15
+			end
+		end
 	end
 	local cd = Stats.Cooldown(player, skillId, skill.Cooldown)
 	s.Cooldowns[slot] = t + cd
@@ -565,7 +578,32 @@ local function castSkill(player: Player, slot: string, payload, charge: number?)
 		Finish = extra.Finish,
 		Target = extra.Target,
 		Duration = extra.Duration,
+		Mastery = mastery,
 	})
+	Combat.GrantMastery(player, M.SkillXP[slot] or 0, def.Class)
+end
+
+-- Adds skill-mastery xp to a weapon class (default: the equipped one).
+function Combat.GrantMastery(player: Player, xp: number, class: string?)
+	local data = DataService.Get(player)
+	if not data or xp <= 0 then
+		return
+	end
+	class = class or Stats.Weapon(player).Class
+	data.Mastery = data.Mastery or {}
+	local before = Config.MasteryLevel(data.Mastery[class] or 0)
+	data.Mastery[class] = (data.Mastery[class] or 0) + xp
+	local after = Config.MasteryLevel(data.Mastery[class])
+	if after > before then
+		local milestone = nil
+		for _, m in ipairs(Config.Mastery.Milestones) do
+			if before < m.Level and after >= m.Level then
+				milestone = m
+			end
+		end
+		Net.FX(player, "MasteryUp", { Class = class, Level = after, Milestone = milestone and milestone.Name or nil, Desc = milestone and milestone.Desc or nil })
+	end
+	DataService.MarkDirty(player)
 end
 
 ---------------------------------------------------------------------

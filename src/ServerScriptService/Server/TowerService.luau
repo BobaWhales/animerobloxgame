@@ -71,16 +71,14 @@ local function buildArena(slot: number)
 end
 
 local BR = Config.BossRush
-local BOSS_STAGES = {}
-for i, stage in ipairs(Config.Stages) do
-	if stage.Boss then
-		table.insert(BOSS_STAGES, i)
-	end
+-- every dungeon boss (floors 5, 10, 15 ... 200) takes a turn
+local BOSS_FLOORS = {}
+for f = Config.Dungeon.BossEvery, Config.Dungeon.FloorsPerZone * #Config.Zones, Config.Dungeon.BossEvery do
+	table.insert(BOSS_FLOORS, f)
 end
 
 local function oreTable(wave: number)
-	local stageIndex = math.clamp(BR.StageReq + wave, 1, #Config.Stages)
-	return Config.Stages[stageIndex].Drops
+	return Config.Floor(BR.StageReq + wave * 2).Drops
 end
 
 local function waveColor(wave: number): Color3
@@ -172,11 +170,10 @@ startWave = function(player: Player, run)
 			return
 		end
 		for k = 1, count do
-			local stageIndex = BOSS_STAGES[((wave + k - 2) % #BOSS_STAGES) + 1]
-			local stage = Config.Stages[stageIndex]
+			local stage = Config.Floor(BOSS_FLOORS[((wave + k - 2) % #BOSS_FLOORS) + 1])
 			local boss = EnemyService.Create({
 				Label = "WAVE " .. wave .. ": " .. stage.Enemy,
-				LookIndex = stageIndex,
+				Look = stage.Look,
 				Color = color,
 				Scale = 2.2,
 				HP = hp,
@@ -214,7 +211,7 @@ function TowerService.Start(player: Player)
 	if s.Tower then
 		return
 	end
-	if data.Stage < BR.StageReq then
+	if (data.BestFloor or 0) <= BR.StageReq then
 		Net.Notify(player, "Boss Rush opens after you clear stage " .. BR.StageReq .. " on the Path.", Color3.fromRGB(255, 120, 90), "Error")
 		return
 	end

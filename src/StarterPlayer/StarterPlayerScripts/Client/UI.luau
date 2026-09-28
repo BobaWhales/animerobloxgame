@@ -172,46 +172,29 @@ local function softLabel(parent: Instance, props)
 	return t
 end
 
--- Currency pills (left stack). Pinned pills are always shown (simulator
--- style); the others fade in for a few seconds when their value changes (or
--- while the menu drawer / a panel is open). Clicking one opens its menu.
+-- Compact currency pills (left). Pinned pills are always shown; a small
+-- badge on the right flags "REBIRTH!" / "FULL". Clicking opens the menu.
 local function makePill(parent, key: string, role: string, color: Color3, order: number, pinned: boolean?, panelName: string?)
 	local holder = Instance.new("CanvasGroup")
 	holder.Name = key
 	holder.BackgroundTransparency = 1
 	holder.GroupTransparency = pinned and 0 or 1
 	holder.Visible = pinned == true
-	holder.Size = UDim2.fromOffset(170, 42)
+	holder.Size = UDim2.fromOffset(138, 30)
 	holder.LayoutOrder = order
 	holder.Parent = parent
-	local f
-	local src = UITheme.Find("Bar")
-	if src then
-		f = Instance.new("ImageLabel")
-		f.Image = src.Image
-		f.ScaleType = src.ScaleType
-		f.SliceCenter = src.SliceCenter
-		f.SliceScale = src.SliceScale
-		f.ImageRectOffset = src.ImageRectOffset
-		f.ImageRectSize = src.ImageRectSize
-		f.BackgroundTransparency = 1
-		f.Size = UDim2.fromScale(1, 1)
-		f.Parent = holder
-	else
-		f = frame(holder, { Color = Color3.fromRGB(10, 8, 18), Transparency = 0.25, Corner = 8 })
-		local st = Instance.new("UIStroke")
-		st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-		st.Thickness = 1.5
-		st.Color = color
-		st.Transparency = 0.45
-		st.Parent = f
-		local chip = frame(f, { Color = color, Transparency = 0.75, Size = UDim2.new(0, 38, 1, 0), Corner = 8 })
-		chip.Name = "Chip"
-	end
+	local f = frame(holder, { Color = Color3.fromRGB(10, 8, 18), Transparency = 0.3, Corner = 15 })
 	f.Name = "Pill"
-	UITheme.Icon(f, role, UDim2.fromOffset(26, 26), UDim2.fromOffset(6, 8))
-	local value = softLabel(f, { Name = "Value", Text = "0", Font = Config.Fonts.Display, Size = UDim2.new(1, -50, 0, 21), Position = UDim2.fromOffset(44, 3), XAlign = Enum.TextXAlignment.Left })
-	local sub = softLabel(f, { Name = "Sub", Text = "", Font = Config.Fonts.Body, Size = UDim2.new(1, -50, 0, 13), Position = UDim2.fromOffset(44, 25), XAlign = Enum.TextXAlignment.Left, Color = color })
+	local st = Instance.new("UIStroke")
+	st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	st.Thickness = 1.2
+	st.Color = color
+	st.Transparency = 0.5
+	st.Parent = f
+	UITheme.Icon(f, role, UDim2.fromOffset(20, 20), UDim2.fromOffset(6, 5))
+	local value = softLabel(f, { Name = "Value", Text = "0", Font = Config.Fonts.Display, Size = UDim2.new(1, -38, 0, 20), Position = UDim2.fromOffset(31, 5), XAlign = Enum.TextXAlignment.Left, MaxText = 18 })
+	local sub = softLabel(f, { Name = "Sub", Text = "", Font = Config.Fonts.Display, Size = UDim2.fromOffset(52, 12), Position = UDim2.new(1, -6, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5), XAlign = Enum.TextXAlignment.Right, Color = C.Gold, MaxText = 11 })
+	sub.Visible = false
 	local sc = Instance.new("UIScale")
 	sc.Parent = f
 	if panelName then
@@ -315,13 +298,13 @@ end
 ---------------------------------------------------------------------
 function UI.Notify(text: string, colorArg: Color3?)
 	local color: Color3 = colorArg or Color3.fromRGB(255, 255, 255)
-	local holder = frame(toastHolder, { Transparency = 1, Size = UDim2.fromOffset(340, 36) })
-	local toast = frame(holder, { Color = Color3.fromRGB(8, 6, 18), Transparency = 0.45, Size = UDim2.fromScale(1, 1), Corner = 10 })
-	toast.Position = UDim2.fromOffset(360, 0)
-	local bar = frame(toast, { Color = color, Size = UDim2.new(0, 3, 1, -14), Position = UDim2.fromOffset(8, 7), Corner = 2 })
+	local holder = frame(toastHolder, { Transparency = 1, Size = UDim2.fromOffset(240, 22) })
+	local toast = frame(holder, { Color = Color3.fromRGB(8, 6, 18), Transparency = 0.45, Size = UDim2.fromScale(1, 1), Corner = 6 })
+	toast.Position = UDim2.fromOffset(260, 0)
+	local bar = frame(toast, { Color = color, Size = UDim2.new(0, 2, 1, -8), Position = UDim2.fromOffset(5, 4), Corner = 1 })
 	bar.Name = "Bar"
-	softLabel(toast, { Text = text, Size = UDim2.new(1, -30, 1, -14), Position = UDim2.fromOffset(20, 7), XAlign = Enum.TextXAlignment.Left, Color = color:Lerp(Color3.new(1, 1, 1), 0.35), MaxText = 16 })
-	tween(toast, 0.35, { Position = UDim2.fromOffset(0, 0) }, Enum.EasingStyle.Quart)
+	softLabel(toast, { Text = text, Size = UDim2.new(1, -18, 1, -6), Position = UDim2.fromOffset(12, 3), XAlign = Enum.TextXAlignment.Left, Color = color:Lerp(Color3.new(1, 1, 1), 0.35), MaxText = 12 })
+	tween(toast, 0.3, { Position = UDim2.fromOffset(0, 0) }, Enum.EasingStyle.Quart)
 	local kids = {}
 	for _, c in ipairs(toastHolder:GetChildren()) do
 		if c:IsA("Frame") then
@@ -333,7 +316,7 @@ function UI.Notify(text: string, colorArg: Color3?)
 	end
 	task.delay(3, function()
 		if toast.Parent then
-			tween(toast, 0.35, { Position = UDim2.fromOffset(360, 0) }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+			tween(toast, 0.3, { Position = UDim2.fromOffset(260, 0) }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 			Debris:AddItem(holder, 0.4)
 		end
 	end)
@@ -640,20 +623,26 @@ local function buildBackpack()
 	end
 end
 
+-- Ore Index: every ore starts LOCKED. Picking one up marks it FOUND; click
+-- the glowing card to unlock it, reveal its effect and claim the coins.
+local function firstFloorFor(ore): number
+	return math.max(1, 5 * (ore.Order - 3) + 1)
+end
+
 local function buildIndex()
 	local p = makePanel("Index", "ORE INDEX", Vector2.new(720, 500), C.Cyan)
 	local grid = scroller(p.Body, { Size = UDim2.new(1, 0, 1, -34) })
 	local g = Instance.new("UIGridLayout")
-	g.CellSize = UDim2.fromOffset(160, 178)
+	g.CellSize = UDim2.fromOffset(160, 150)
 	g.CellPadding = UDim2.fromOffset(8, 8)
 	g.SortOrder = Enum.SortOrder.LayoutOrder
 	g.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	g.Parent = grid
-	local footer = UITheme.Label(p.Body, { Text = "", Size = UDim2.new(1, 0, 0, 28), Position = UDim2.new(0, 0, 1, 0), AnchorPoint = Vector2.new(0, 1), Color = C.Gold, MaxText = 18 })
+	local footer = UITheme.Label(p.Body, { Text = "", Size = UDim2.new(1, 0, 0, 26), Position = UDim2.new(0, 0, 1, 0), AnchorPoint = Vector2.new(0, 1), Color = C.Gold, MaxText = 16 })
 	p.Refresh = function(d)
 		local sigParts = {}
 		for _, ore in ipairs(Config.Ores) do
-			table.insert(sigParts, d.Index[ore.Id] and "1" or "0")
+			table.insert(sigParts, d.Index[ore.Id] and "U" or ((d.IndexFound or {})[ore.Id] and "F" or "L"))
 		end
 		local sig = table.concat(sigParts)
 		if p.Sig == sig then
@@ -661,30 +650,56 @@ local function buildIndex()
 		end
 		p.Sig = sig
 		clearList(grid)
-		local found = 0
+		local unlocked, waiting = 0, 0
 		for i, ore in ipairs(Config.Ores) do
 			local known = d.Index[ore.Id] == true
+			local found = not known and (d.IndexFound or {})[ore.Id] == true
 			if known then
-				found += 1
+				unlocked += 1
+			elseif found then
+				waiting += 1
 			end
 			local rarity = Config.Rarity[ore.Rarity]
 			local eff = Config.Effects[ore.Effect]
-			local card = frame(grid, { Color = known and C.Row or Color3.fromRGB(16, 14, 22), Order = i, Corner = 10 })
-			local st = UITheme.Stroke(card, known and 2 or 1, known and rarity.Color or C.Line, true)
-			st.Transparency = known and 0.1 or 0.5
-			local gem = frame(card, { Color = known and ore.Color or Color3.fromRGB(44, 42, 54), Size = UDim2.fromOffset(44, 44), Position = UDim2.new(0.5, 0, 0, 34), AnchorPoint = Vector2.new(0.5, 0.5), Stroke = 2 })
+			local card = frame(grid, { Color = known and C.Row or Color3.fromRGB(14, 12, 20), Order = i, Corner = 10 })
+			local st = UITheme.Stroke(card, (known or found) and 2 or 1, (known or found) and rarity.Color or C.Line, true)
+			st.Transparency = (known or found) and 0.1 or 0.6
+			local gem = frame(card, { Color = known and ore.Color or (found and rarity.Color or Color3.fromRGB(40, 38, 50)), Size = UDim2.fromOffset(38, 38), Position = UDim2.new(0.5, 0, 0, 30), AnchorPoint = Vector2.new(0.5, 0.5), Stroke = 2 })
 			gem.Rotation = 45
-			if known then
-				local shine = frame(gem, { Color = Color3.new(1, 1, 1), Transparency = 0.5, Size = UDim2.fromScale(0.35, 0.35), Position = UDim2.fromScale(0.15, 0.15) })
-				shine.Name = "Shine"
+			if found then
+				gem.BackgroundTransparency = 0.4
+				local q = UITheme.Label(card, { Text = "?", Title = true, Size = UDim2.fromOffset(30, 30), Position = UDim2.new(0.5, 0, 0, 30), AnchorPoint = Vector2.new(0.5, 0.5), MaxText = 24 })
+				q.ZIndex = 3
 			end
-			UITheme.Label(card, { Text = known and ore.Name or "???", Title = true, Size = UDim2.new(1, -10, 0, 24), Position = UDim2.fromOffset(5, 64), Color = known and ore.Color or C.Sub, MaxText = 19 })
-			UITheme.Label(card, { Text = rarity.Label, Size = UDim2.new(1, -10, 0, 18), Position = UDim2.fromOffset(5, 88), Color = rarity.Color, MaxText = 14 })
-			local body = known and Config.EffectText(ore.Effect, ore.Points) or ("Effect: " .. (eff and eff.Name or "?") .. "\nFind it for " .. Format.Abbrev(Config.IndexReward[ore.Rarity]) .. " Coins")
-			local t = UITheme.Label(card, { Text = body, Size = UDim2.new(1, -12, 0, 62), Position = UDim2.fromOffset(6, 108), Color = known and (eff and eff.Color or C.Text) or C.Sub, MaxText = 13, StrokeThickness = 1 })
-			t.TextWrapped = true
+			if known then
+				UITheme.Label(card, { Text = ore.Name, Title = true, Size = UDim2.new(1, -10, 0, 20), Position = UDim2.fromOffset(5, 56), Color = ore.Color, MaxText = 17 })
+				UITheme.Label(card, { Text = rarity.Label, Size = UDim2.new(1, -10, 0, 15), Position = UDim2.fromOffset(5, 76), Color = rarity.Color, MaxText = 13 })
+				local t = UITheme.Label(card, { Text = Config.EffectText(ore.Effect, ore.Points), Size = UDim2.new(1, -12, 0, 50), Position = UDim2.fromOffset(6, 94), Color = eff and eff.Color or C.Text, MaxText = 12, StrokeThickness = 1 })
+				t.TextWrapped = true
+			elseif found then
+				UITheme.Label(card, { Text = "NEW ORE FOUND!", Title = true, Size = UDim2.new(1, -10, 0, 18), Position = UDim2.fromOffset(5, 58), Color = rarity.Color, MaxText = 15 })
+				local btn = UITheme.Button(card, { Text = "UNLOCK +" .. Format.Abbrev(Config.IndexReward[ore.Rarity]), Color = "Gold", Size = UDim2.new(1, -16, 0, 40), Position = UDim2.new(0.5, 0, 1, -8), AnchorPoint = Vector2.new(0.5, 1), MaxText = 15, Corner = 8, Sound = "Discover", OnClick = function()
+					request("UnlockIndex", ore.Id)
+				end })
+				local pulse = btn:FindFirstChildOfClass("UIScale")
+				if pulse then
+					task.spawn(function()
+						while btn.Parent do
+							tween(pulse, 0.5, { Scale = 1.05 })
+							task.wait(0.5)
+							tween(pulse, 0.5, { Scale = 1 })
+							task.wait(0.5)
+						end
+					end)
+				end
+			else
+				UITheme.Label(card, { Text = "LOCKED", Title = true, Size = UDim2.new(1, -10, 0, 20), Position = UDim2.fromOffset(5, 58), Color = C.Sub, MaxText = 16 })
+				UITheme.Label(card, { Text = rarity.Label .. " ore", Size = UDim2.new(1, -10, 0, 15), Position = UDim2.fromOffset(5, 80), Color = rarity.Color, MaxText = 13 })
+				local hint = UITheme.Label(card, { Text = "Drops from floor " .. firstFloorFor(ore) .. "+", Size = UDim2.new(1, -12, 0, 30), Position = UDim2.fromOffset(6, 100), Color = C.Sub, MaxText = 12 })
+				hint.TextWrapped = true
+			end
 		end
-		footer.Text = string.format("Discovered %d / %d ores  -  every new ore pays Coins", found, #Config.Ores)
+		footer.Text = string.format("Unlocked %d / %d ores%s", unlocked, #Config.Ores, waiting > 0 and ("  -  " .. waiting .. " waiting to be unlocked!") or "")
 	end
 end
 
@@ -776,38 +791,127 @@ local function buildShop()
 end
 
 local function buildTeleport()
-	local p = makePanel("Teleport", "TRAVEL", Vector2.new(680, 490), C.Cyan)
-	UITheme.Label(p.Body, { Text = "Spawn, Training and Boss Rush are free. Jumping to a stage needs Fast Travel - or just walk the Path!", Size = UDim2.new(1, 0, 0, 26), Color = C.Sub, MaxText = 15 })
-	local grid = scroller(p.Body, { Size = UDim2.new(1, 0, 1, -34), Position = UDim2.fromOffset(0, 34) })
+	local p = makePanel("Teleport", "TRAVEL", Vector2.new(560, 330), C.Cyan)
+	UITheme.Label(p.Body, { Text = "Travelling ends a dungeon run.", Size = UDim2.new(1, 0, 0, 22), Color = C.Sub, MaxText = 15 })
+	local grid = frame(p.Body, { Transparency = 1, Size = UDim2.new(1, 0, 1, -30), Position = UDim2.fromOffset(0, 30) })
 	local g = Instance.new("UIGridLayout")
-	g.CellSize = UDim2.fromOffset(200, 58)
+	g.CellSize = UDim2.fromOffset(240, 64)
+	g.CellPadding = UDim2.fromOffset(10, 10)
+	g.SortOrder = Enum.SortOrder.LayoutOrder
+	g.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	g.Parent = grid
+	for i, d in ipairs({ { "Spawn", "Hub", "Green" }, { "Dungeon Gate", "Dungeon", "Purple" }, { "Training", "Train", "Blue" }, { "Boss Rush", "Tower", "Red" } }) do
+		UITheme.Button(grid, { Text = d[1], Color = d[3], Order = i, MaxText = 22, Sound = "Teleport", OnClick = function()
+			request("Teleport", d[2])
+			UI.Close()
+		end })
+	end
+end
+
+-- Dungeon: pick a start floor (floor 1 or an unlocked checkpoint).
+local function buildDungeon()
+	local p = makePanel("Dungeon", "THE DUNGEON", Vector2.new(640, 470), C.Purple)
+	local info = rowFrame(p.Body, 96, 0)
+	accentBar(info, C.Purple)
+	local best = UITheme.Label(info, { Text = "", Title = true, Size = UDim2.new(1, -30, 0, 30), Position = UDim2.fromOffset(18, 8), XAlign = Enum.TextXAlignment.Left, Color = C.Purple, MaxText = 26 })
+	local rules = UITheme.Label(info, { Text = "", Rich = true, Size = UDim2.new(1, -30, 0, 50), Position = UDim2.fromOffset(18, 40), XAlign = Enum.TextXAlignment.Left, Color = C.Sub, MaxText = 14 })
+	rules.TextWrapped = true
+	rules.TextYAlignment = Enum.TextYAlignment.Top
+	UITheme.Label(p.Body, { Text = "START FROM", Size = UDim2.new(1, 0, 0, 20), Position = UDim2.fromOffset(0, 104), Color = C.Sub, MaxText = 15, XAlign = Enum.TextXAlignment.Left })
+	local grid = scroller(p.Body, { Size = UDim2.new(1, 0, 1, -196), Position = UDim2.fromOffset(0, 126) })
+	local g = Instance.new("UIGridLayout")
+	g.CellSize = UDim2.fromOffset(190, 58)
 	g.CellPadding = UDim2.fromOffset(8, 8)
 	g.SortOrder = Enum.SortOrder.LayoutOrder
 	g.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	g.Parent = grid
+	local footer = frame(p.Body, { Transparency = 1, Size = UDim2.new(1, 0, 0, 60), Position = UDim2.new(0, 0, 1, 0), AnchorPoint = Vector2.new(0, 1) })
+	local runLabel = UITheme.Label(footer, { Text = "", Size = UDim2.new(0.6, 0, 1, 0), XAlign = Enum.TextXAlignment.Left, Color = C.Gold, MaxText = 17 })
+	local actionBtn = UITheme.Button(footer, { Text = "GO TO GATE", Color = "Blue", Size = UDim2.fromOffset(220, 54), Position = UDim2.new(1, 0, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5), MaxText = 20, OnClick = function()
+		local d = UI.Data
+		if d and d.Run then
+			request("Teleport", "Hub")
+		else
+			request("Teleport", "Dungeon")
+		end
+		UI.Close()
+	end })
 	p.Refresh = function(d)
-		local sig = tostring(d.Stage)
+		local D = Config.Dungeon
+		local bestFloor = d.BestFloor or 0
+		best.Text = "DEEPEST FLOOR: " .. bestFloor
+		local cps = d.Checkpoints or { 1 }
+		local last = cps[#cps]
+		local lockedCp = last == 1 and D.CheckpointEvery or last + D.CheckpointEvery
+		rules.Text = string.format('Clear each room to open the next door. <font color="#ff5a6e">Boss every %d floors.</font> Dying or going HOME ends the run.\nNext checkpoint: <font color="#ffc432">start at floor %d</font> once you reach floor %d.', D.BossEvery, lockedCp, lockedCp + D.CheckpointEvery)
+		local sig = table.concat(d.Checkpoints or { 1 }, ",") .. (d.Run and ("R" .. d.Run.Floor) or "")
+		if d.Run then
+			runLabel.Text = "In a run: floor " .. d.Run.Floor .. " (started at " .. d.Run.Start .. ")"
+			UITheme.SetButtonText(actionBtn, "END RUN (HOME)")
+		else
+			runLabel.Text = ""
+			UITheme.SetButtonText(actionBtn, "GO TO GATE")
+		end
 		if p.Sig == sig then
 			return
 		end
 		p.Sig = sig
 		clearList(grid)
-		local function add(order, text, dest, color, locked)
-			UITheme.Button(grid, { Text = locked and ("LOCKED  " .. text) or text, Color = locked and "Red" or color, Order = order, MaxText = 19, Sound = "Teleport", OnClick = function()
-				request("Teleport", dest)
+		for i, f in ipairs(cps) do
+			UITheme.Button(grid, { Text = "FLOOR " .. f, Color = f == 1 and "Green" or "Purple", Order = i, MaxText = 20, Sound = "Teleport", OnClick = function()
+				request("DungeonStart", f)
 				UI.Close()
 			end })
 		end
-		add(1, "Spawn", "Hub", "Green")
-		add(2, "Training", "Train", "Blue")
-		add(3, "Boss Rush", "Tower", "Purple")
-		for i, stage in ipairs(Config.Stages) do
-			local unlocked = d.Stage >= i - 1
-			local label = (stage.Boss and "BOSS " or "Stage ") .. i
-			if unlocked and i > d.Stage then
-				label ..= "  (current)"
+		-- the next locked checkpoint, as a teaser
+		UITheme.Button(grid, { Text = "FLOOR " .. lockedCp .. " (reach " .. (lockedCp + D.CheckpointEvery) .. ")", Color = "Red", Order = 999, MaxText = 15, OnClick = function()
+			UI.Notify("Reach floor " .. (lockedCp + D.CheckpointEvery) .. " to unlock this checkpoint.", C.Red)
+		end })
+	end
+end
+
+-- Skill mastery per weapon type.
+local function buildMastery()
+	local p = makePanel("Mastery", "SKILL MASTERY", Vector2.new(680, 500), C.Gold)
+	local legend = rowFrame(p.Body, 64, 0)
+	accentBar(legend, C.Gold)
+	local parts = {}
+	for _, m in ipairs(Config.Mastery.Milestones) do
+		table.insert(parts, string.format('<font color="#ffc432">Lv %d %s</font>: %s', m.Level, m.Name, m.Desc))
+	end
+	local lt = UITheme.Label(legend, { Text = "Use E / R skills and get kills with a weapon type to level it. +3% skill damage per level.\n" .. table.concat(parts, "   "), Rich = true, Size = UDim2.new(1, -30, 1, -10), Position = UDim2.fromOffset(18, 5), XAlign = Enum.TextXAlignment.Left, MaxText = 13, StrokeThickness = 1 })
+	lt.TextWrapped = true
+	local listFrame = scroller(p.Body, { Size = UDim2.new(1, 0, 1, -72), Position = UDim2.fromOffset(0, 72) })
+	list(listFrame, 5)
+	p.Refresh = function(d)
+		local cur = player:GetAttribute("WeaponClass")
+		local sigParts = { tostring(cur) }
+		for _, cls in ipairs(Config.ClassOrder) do
+			table.insert(sigParts, math.floor((d.Mastery or {})[cls] or 0))
+		end
+		local sig = table.concat(sigParts, ",")
+		if p.Sig == sig then
+			return
+		end
+		p.Sig = sig
+		clearList(listFrame)
+		for i, cls in ipairs(Config.ClassOrder) do
+			local xp = (d.Mastery or {})[cls] or 0
+			local level, into, need = Config.MasteryLevel(xp)
+			local r = rowFrame(listFrame, 44, (cls == cur) and 0 or i, cls == cur and Color3.fromRGB(44, 38, 20) or nil)
+			accentBar(r, cls == cur and C.Gold or C.Line)
+			UITheme.Label(r, { Text = cls .. (cls == cur and "  (equipped)" or ""), Title = true, Size = UDim2.fromOffset(200, 22), Position = UDim2.fromOffset(18, 4), XAlign = Enum.TextXAlignment.Left, Color = cls == cur and C.Gold or C.Text, MaxText = 17 })
+			local title = "Novice"
+			for _, m in ipairs(Config.Mastery.Milestones) do
+				if level >= m.Level then
+					title = m.Name
+				end
 			end
-			add(10 + i, label, "Stage_" .. i, stage.Boss and "Gold" or "Blue", not unlocked)
+			UITheme.Label(r, { Text = "Lv " .. level .. "  " .. title, Size = UDim2.fromOffset(200, 16), Position = UDim2.fromOffset(18, 25), XAlign = Enum.TextXAlignment.Left, Color = C.Sub, MaxText = 13 })
+			local barBg = frame(r, { Color = Color3.fromRGB(12, 10, 20), Size = UDim2.new(1, -250, 0, 14), Position = UDim2.new(0, 230, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5), Corner = 7 })
+			local fill = frame(barBg, { Color = C.Gold, Size = UDim2.fromScale(need > 0 and math.clamp(into / need, 0, 1) or 1, 1), Corner = 7 })
+			fill.Name = "Fill"
+			UITheme.Label(barBg, { Text = need > 0 and (Format.Abbrev(into) .. " / " .. Format.Abbrev(need) .. " xp") or "MAX", Size = UDim2.fromScale(1, 1), ZIndex = 3, MaxText = 11, StrokeThickness = 1 })
 		end
 	end
 end
@@ -864,30 +968,35 @@ local function buildRebirth()
 end
 
 local function buildSettings()
-	local p = makePanel("Settings", "SETTINGS", Vector2.new(480, 330), Color3.fromRGB(150, 150, 170))
+	local p = makePanel("Settings", "SETTINGS", Vector2.new(480, 440), Color3.fromRGB(150, 150, 170))
 	local holder = frame(p.Body, { Transparency = 1 })
-	list(holder, 12)
-	local state = { Music = true, SFX = true }
+	list(holder, 10)
+	local KEYS = { { "Music", "Music" }, { "SFX", "Sound effects" }, { "AutoEquip", "Auto-equip forged weapons" }, { "Shake", "Screen shake" }, { "DamageNumbers", "Damage numbers" } }
+	local state = { Music = true, SFX = true, AutoEquip = true, Shake = true, DamageNumbers = true }
 	local buttons = {}
 	local function apply()
-		SFX.SetMusicVolume(state.Music and 0.45 or 0)
-		SFX.SetSFXVolume(state.SFX and 0.9 or 0)
-		for key, btn in pairs(buttons) do
-			UITheme.SetButtonText(btn, key .. ": " .. (state[key] and "ON" or "OFF"))
+		SFX.SetMusicVolume(state.Music and 0.3 or 0)
+		SFX.SetSFXVolume(state.SFX and 0.55 or 0)
+		VFX.Settings.Shake = state.Shake
+		VFX.Settings.DamageNumbers = state.DamageNumbers
+		for _, k in ipairs(KEYS) do
+			local btn = buttons[k[1]]
+			UITheme.SetButtonText(btn, k[2] .. ": " .. (state[k[1]] and "ON" or "OFF"))
 		end
 	end
-	for i, key in ipairs({ "Music", "SFX" }) do
-		buttons[key] = UITheme.Button(holder, { Text = key, Color = "Blue", Size = UDim2.fromOffset(320, 64), Order = i, OnClick = function()
-			state[key] = not state[key]
+	for i, k in ipairs(KEYS) do
+		buttons[k[1]] = UITheme.Button(holder, { Text = k[2], Color = "Blue", Size = UDim2.fromOffset(380, 52), Order = i, MaxText = 20, OnClick = function()
+			state[k[1]] = not state[k[1]]
 			apply()
 			request("Settings", state)
 		end })
 	end
-	UITheme.Label(holder, { Text = Config.GameName, Title = true, Size = UDim2.fromOffset(320, 30), Order = 9, Color = C.Pink, MaxText = 22 })
+	UITheme.Label(holder, { Text = Config.GameName, Title = true, Size = UDim2.fromOffset(320, 26), Order = 99, Color = C.Pink, MaxText = 20 })
 	p.Refresh = function(d)
 		if d.Settings then
-			state.Music = d.Settings.Music ~= false
-			state.SFX = d.Settings.SFX ~= false
+			for _, k in ipairs(KEYS) do
+				state[k[1]] = d.Settings[k[1]] ~= false
+			end
 		end
 		apply()
 	end
@@ -1011,51 +1120,58 @@ function UI.Tower(state: string?, wave: number?, endsAt: number?)
 	title.Text = "BOSS RUSH  -  WAVE " .. tostring(wave or 1)
 end
 
--- Which Path stage a world position is in (nil when off the Path).
-local function stageAt(pos: Vector3): number?
-	local W = Config.World
-	if pos.Z > W.PathStartZ or math.abs(pos.X) > W.PathWidth / 2 + 6 then
-		return nil
-	end
-	for i in ipairs(Config.Stages) do
-		local zStart, zEnd = Config.StageBounds(i)
-		if pos.Z <= zStart and pos.Z > zEnd then
-			return i
-		end
-	end
-	return nil
-end
-UI.StageAt = stageAt
-
 local function refreshStageHud(d)
-	local char = player.Character
-	local rootPart = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
-	local i = rootPart and stageAt(rootPart.Position)
-	if not i or not d or towerHud.Visible then
+	local run = d and d.Run
+	if not run or towerHud.Visible then
 		stageHud.Visible = false
 		return
 	end
 	stageHud.Visible = true
-	local stage = Config.Stages[i]
-	local zone = Config.Zones[stage.Zone]
+	local fd = Config.Floor(run.Floor)
+	local zone = fd.ZoneData
 	local title = stageHud:FindFirstChild("Title") :: TextLabel
 	local count = stageHud:FindFirstChild("Count") :: TextLabel
 	local fill = (stageHud:FindFirstChild("Bar") :: Frame):FindFirstChild("Fill") :: Frame
-	title.Text = (stage.Boss and "BOSS STAGE " or "STAGE ") .. i .. "  " .. zone.Name:upper()
-	title.TextColor3 = stage.Boss and C.Red or zone.Accent
-	if i <= d.Stage then
-		count.Text = "CLEARED"
-		count.TextColor3 = C.Green
-		fill.Size = UDim2.fromScale(1, 1)
-		fill.BackgroundColor3 = C.Green
-	else
-		local need = stage.Kills
-		local kills = math.min(d.StageKills or 0, need)
-		count.Text = stage.Boss and (kills >= need and "DEFEATED" or "SLAY THE BOSS") or (kills .. " / " .. need .. " KOs")
+	title.Text = (fd.Boss and "BOSS FLOOR " or "FLOOR ") .. run.Floor .. "  " .. zone.Name:upper()
+	title.TextColor3 = fd.Boss and C.Red or zone.Accent
+	fill.BackgroundColor3 = fd.Boss and C.Red or zone.Accent
+	if run.State == "Fighting" then
+		local kills = math.min(run.Kills or 0, run.Need)
+		count.Text = fd.Boss and "SLAY THE BOSS" or (kills .. " / " .. run.Need .. " KOs")
 		count.TextColor3 = C.Gold
-		fill.Size = UDim2.fromScale(math.clamp(kills / math.max(1, need), 0, 1), 1)
-		fill.BackgroundColor3 = stage.Boss and C.Red or zone.Accent
+		fill.Size = UDim2.fromScale(math.clamp(kills / math.max(1, run.Need), 0, 1), 1)
+	else
+		count.Text = "ENTER THE ROOM"
+		count.TextColor3 = C.Sub
+		fill.Size = UDim2.fromScale(0, 1)
 	end
+end
+
+-- Small end-of-run card (death / HOME).
+function UI.RunSummary(p)
+	local fly = flyGui
+	local card = frame(fly, { Color = Color3.fromRGB(10, 8, 18), Transparency = 0.15, Size = UDim2.fromOffset(300, 118), Position = UDim2.new(0.5, 0, 0, 150), AnchorPoint = Vector2.new(0.5, 0), Corner = 10, ZIndex = 50 })
+	local st = UITheme.Stroke(card, 1.5, p.Reason == "Died" and C.Red or C.Purple, true)
+	st.Transparency = 0.2
+	local reason = p.Reason == "Died" and "YOU FELL" or (p.Reason == "Home" and "RUN ENDED" or "RUN OVER")
+	softLabel(card, { Text = reason, Font = Config.Fonts.Display, Size = UDim2.new(1, -20, 0, 24), Position = UDim2.fromOffset(10, 6), Color = p.Reason == "Died" and C.Red or C.Purple, MaxText = 22, ZIndex = 51 })
+	softLabel(card, { Text = string.format("Reached floor %d  -  cleared %d  -  +%s coins", p.Reached or 1, p.Cleared or 0, Format.Abbrev(p.Coins or 0)), Font = Config.Fonts.Body, Size = UDim2.new(1, -20, 0, 16), Position = UDim2.fromOffset(10, 34), MaxText = 14, ZIndex = 51 })
+	local cps = p.Checkpoints or { 1 }
+	softLabel(card, { Text = "Deepest: " .. (p.Best or 0) .. "  -  next run can start at floor " .. cps[#cps], Font = Config.Fonts.Body, Size = UDim2.new(1, -20, 0, 14), Position = UDim2.fromOffset(10, 54), Color = C.Sub, MaxText = 13, ZIndex = 51 })
+	UITheme.Button(card, { Text = "BACK TO THE GATE", Color = "Purple", Size = UDim2.new(1, -20, 0, 34), Position = UDim2.new(0.5, 0, 1, -8), AnchorPoint = Vector2.new(0.5, 1), MaxText = 16, Corner = 8, ZIndex = 52, OnClick = function()
+		request("Teleport", "Dungeon")
+		card:Destroy()
+	end })
+	local sc = Instance.new("UIScale")
+	sc.Scale = 0.7
+	sc.Parent = card
+	tween(sc, 0.25, { Scale = 1 }, Enum.EasingStyle.Back)
+	task.delay(7, function()
+		if card.Parent then
+			tween(sc, 0.2, { Scale = 0 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+			Debris:AddItem(card, 0.25)
+		end
+	end)
 end
 
 local eventSig = ""
@@ -1087,30 +1203,19 @@ end
 function UI.Update(d)
 	local first = UI.Data == nil
 	UI.Data = d
-	local tier = Config.GetBladeTier(d.Blade)
 	animateNumber("Power", pills.Power.Value, d.Power, Format.Abbrev)
-	pills.Power.Sub.Text = "+" .. Format.Abbrev(d.Derived.PowerPerSwing) .. " / swing"
-	animateNumber("Blade", pills.Blade.Value, d.Blade, function(v)
-		return "Forge +" .. Format.Abbrev(math.floor(v))
-	end)
-	pills.Blade.Sub.Text = tier.Name
-	pills.Blade.Sub.TextColor3 = tier.Edge or C.Sub
+	local ready = d.Power >= d.RebirthReq
+	pills.Power.Sub.Text = "REBIRTH!"
+	pills.Power.Sub.Visible = ready
 	animateNumber("Coins", pills.Coins.Value, d.Coins, Format.Abbrev)
-	pills.Coins.Sub.Text = "x" .. Format.Abbrev(d.Derived.CoinMult) .. " coins"
-	pills.Backpack.Value.Text = Format.Abbrev(d.BackpackCount) .. " / " .. Format.Abbrev(d.BackpackMax)
+	pills.Backpack.Value.Text = Format.Abbrev(d.BackpackCount) .. "/" .. Format.Abbrev(d.BackpackMax)
 	local full = d.BackpackCount >= d.BackpackMax
-	pills.Backpack.Sub.Text = full and "BAG FULL - SELL!" or "ore bag"
-	pills.Backpack.Sub.TextColor3 = full and C.Red or pills.Backpack.Color
-	pills.Rebirths.Value.Text = (d.Ascensions > 0 and ("A" .. d.Ascensions .. "  ") or "") .. Format.Abbrev(d.Rebirths) .. " Reb"
-	local rp = math.floor(math.clamp(d.Power / math.max(1, d.RebirthReq), 0, 1) * 100)
-	pills.Rebirths.Sub.Text = rp >= 100 and "REBIRTH READY!" or (rp .. "% to rebirth")
-	pills.Rebirths.Sub.TextColor3 = rp >= 100 and C.Gold or pills.Rebirths.Color
-	pills.Damage.Value.Text = Format.Abbrev(d.Derived.Damage) .. " DMG"
-	pills.Damage.Sub.Text = "Runes: " .. d.Runes
+	pills.Backpack.Sub.Text = "FULL"
+	pills.Backpack.Sub.TextColor3 = C.Red
+	pills.Backpack.Sub.Visible = full
 	adminButton.Visible = d.IsAdmin == true
 
-	-- contextual: the unpinned resources that changed fade in
-	local now = { Power = d.Power, Blade = d.Blade, Coins = d.Coins, Backpack = d.BackpackCount, Rebirths = d.Rebirths, Damage = d.Derived.Damage }
+	local now = { Power = d.Power, Coins = d.Coins, Backpack = d.BackpackCount }
 	for key, v in pairs(now) do
 		if not first and prevValues[key] ~= nil and prevValues[key] ~= v then
 			UI.Reveal(key)
@@ -1249,19 +1354,15 @@ function UI.Init(requestFn)
 		end
 	end)
 
-	-- simulator-style currency stack (left, vertically centred). Power, Coins,
-	-- the ore bag and Rebirths are always shown; Forge level and Damage fade
-	-- in when they change. Clicking a pill opens the matching menu.
-	local stack = frame(root, { Transparency = 1, Size = UDim2.fromOffset(176, 300), Position = UDim2.new(0, 16, 0.5, -10), AnchorPoint = Vector2.new(0, 0.5) })
+	-- compact currency stack (left): Power, Coins and the ore bag only.
+	-- Clicking a pill opens the matching menu.
+	local stack = frame(root, { Transparency = 1, Size = UDim2.fromOffset(140, 110), Position = UDim2.new(0, 16, 0.5, -10), AnchorPoint = Vector2.new(0, 0.5) })
 	stack.Name = "Resources"
-	local sl = list(stack, 6, false, Enum.HorizontalAlignment.Left)
+	local sl = list(stack, 5, false, Enum.HorizontalAlignment.Left)
 	sl.VerticalAlignment = Enum.VerticalAlignment.Center
-	makePill(stack, "Power", "Icon_Power", Color3.fromRGB(120, 255, 170), 1, true, nil)
+	makePill(stack, "Power", "Icon_Power", Color3.fromRGB(120, 255, 170), 1, true, "Rebirth")
 	makePill(stack, "Coins", "Icon_Coins", C.Gold, 2, true, "Upgrades")
 	makePill(stack, "Backpack", "Icon_Backpack", Color3.fromRGB(120, 200, 255), 3, true, "Backpack")
-	makePill(stack, "Rebirths", "Icon_Rebirth", Color3.fromRGB(210, 150, 255), 4, true, "Rebirth")
-	makePill(stack, "Blade", "Icon_Blade", Color3.fromRGB(255, 170, 80), 5, false, "Forge")
-	makePill(stack, "Damage", "Icon_Rune", Color3.fromRGB(255, 110, 120), 6, false, "Weapons")
 
 	-- single small menu button; everything else lives in the drawer
 	local menuBtn = Instance.new("TextButton")
@@ -1315,9 +1416,9 @@ function UI.Init(requestFn)
 	})
 	homeBtn.ZIndex = 2
 
-	-- stage tracker (under HOME, only while standing on the Path)
+	-- floor tracker (under HOME, only during a dungeon run)
 	stageHud = frame(root, { Color = Color3.fromRGB(10, 8, 18), Transparency = 0.3, Size = UDim2.fromOffset(330, 50), Position = UDim2.new(0.5, 0, 0, inset.Y + 54), AnchorPoint = Vector2.new(0.5, 0), Corner = 8 })
-	stageHud.Name = "StageTracker"
+	stageHud.Name = "FloorTracker"
 	stageHud.Visible = false
 	local shStroke = UITheme.Stroke(stageHud, 1, C.Line, true)
 	shStroke.Transparency = 0.3
@@ -1339,7 +1440,7 @@ function UI.Init(requestFn)
 	drawer.BackgroundTransparency = 0.2
 	drawer.GroupTransparency = 1
 	drawer.Visible = false
-	drawer.Size = UDim2.fromOffset(188, 482)
+	drawer.Size = UDim2.fromOffset(188, 540)
 	drawer.Position = UDim2.new(0, DRAWER_X - 28, 0, inset.Y + 60)
 	drawer.ZIndex = 3
 	drawer.Parent = root
@@ -1394,6 +1495,7 @@ function UI.Init(requestFn)
 		end)
 		return b
 	end
+	drawerButton("Dungeon", "Icon_Tower", C.Purple, 0, function() UI.Toggle("Dungeon") end)
 	drawerButton("Weapons", "Icon_Blade", C.Purple, 1, function() UI.Toggle("Weapons") end)
 	drawerButton("Forge", "Icon_Blade", Color3.fromRGB(255, 140, 60), 2, function() UI.Toggle("Forge") end)
 	drawerButton("Armor", "Icon_Rune", C.Cyan, 3, function() UI.Toggle("Armor") end)
@@ -1406,6 +1508,7 @@ function UI.Init(requestFn)
 	drawerButton("Upgrades", "Icon_Upgrades", C.Blue, 6, function() UI.Toggle("Upgrades") end)
 	drawerButton("Rebirth", "Icon_Rebirth", C.Gold, 7, function() UI.Toggle("Rebirth") end)
 	drawerButton("Race", "Icon_Race", C.Purple, 8, function() UI.Toggle("Race") end)
+	drawerButton("Mastery", "Icon_Power", C.Gold, 8, function() UI.Toggle("Mastery") end)
 	drawerButton("Index", "Icon_Index", C.Blue, 9, function() UI.Toggle("Index") end)
 	drawerButton("Travel", "Icon_Teleport", C.Green, 10, function() UI.Toggle("Teleport") end)
 	drawerButton("Shop", "Icon_Shop", C.Green, 11, function() UI.Toggle("Shop") end)
@@ -1438,11 +1541,11 @@ function UI.Init(requestFn)
 	padLabel.Visible = false
 
 	-- zone banner (fades in and out on arrival)
-	zoneBanner = frame(root, { Transparency = 1, Size = UDim2.fromOffset(560, 70), Position = UDim2.new(0.5, 0, 0, 170), AnchorPoint = Vector2.new(0.5, 0) })
+	zoneBanner = frame(root, { Transparency = 1, Size = UDim2.fromOffset(320, 40), Position = UDim2.new(0.5, 0, 0, 170), AnchorPoint = Vector2.new(0.5, 0) })
 	zoneBanner.Name = "ZoneBanner"
 	zoneBanner.Visible = false
-	softLabel(zoneBanner, { Name = "Title", Text = "", Font = Config.Fonts.Display, Size = UDim2.new(1, 0, 0, 40), MaxText = 38 })
-	softLabel(zoneBanner, { Name = "Sub", Text = "", Font = Config.Fonts.Body, Size = UDim2.new(1, 0, 0, 20), Position = UDim2.fromOffset(0, 44), MaxText = 18, Color = C.Sub })
+	softLabel(zoneBanner, { Name = "Title", Text = "", Font = Config.Fonts.Display, Size = UDim2.new(1, 0, 0, 22), MaxText = 22 })
+	softLabel(zoneBanner, { Name = "Sub", Text = "", Font = Config.Fonts.Body, Size = UDim2.new(1, 0, 0, 13), Position = UDim2.fromOffset(0, 24), MaxText = 13, Color = C.Sub })
 
 	-- boss rush hud (only during a run)
 	towerHud = frame(root, { Color = Color3.fromRGB(10, 8, 18), Transparency = 0.3, Size = UDim2.fromOffset(330, 64), Position = UDim2.new(0.5, 0, 0, inset.Y + 54), AnchorPoint = Vector2.new(0.5, 0), Corner = 8 })
@@ -1455,9 +1558,9 @@ function UI.Init(requestFn)
 	end })
 
 	-- notifications
-	toastHolder = frame(root, { Transparency = 1, Size = UDim2.fromOffset(340, 300), Position = UDim2.new(1, -16, 0, inset.Y + 60), AnchorPoint = Vector2.new(1, 0) })
+	toastHolder = frame(root, { Transparency = 1, Size = UDim2.fromOffset(240, 160), Position = UDim2.new(1, -12, 0, inset.Y + 56), AnchorPoint = Vector2.new(1, 0) })
 	toastHolder.Name = "Toasts"
-	local tl = list(toastHolder, 6)
+	local tl = list(toastHolder, 3)
 	tl.VerticalAlignment = Enum.VerticalAlignment.Top
 	tl.HorizontalAlignment = Enum.HorizontalAlignment.Right
 	toastHolder.ClipsDescendants = false
@@ -1468,6 +1571,8 @@ function UI.Init(requestFn)
 	buildIndex()
 	buildShop()
 	buildTeleport()
+	buildDungeon()
+	buildMastery()
 	buildRebirth()
 	buildSettings()
 end
