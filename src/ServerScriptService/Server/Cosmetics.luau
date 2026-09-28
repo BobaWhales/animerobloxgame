@@ -161,6 +161,27 @@ function Cosmetics.Apply(player: Player)
 		tr.Parent = root
 	end
 
+	-- exclusive play-time aura (120 minute reward)
+	if data.Cosmetics and data.Cosmetics.PlaytimeAura then
+		local a = attachment(root, "Cos_Playtime", Vector3.new(0, -2.6, 0))
+		for i, c in ipairs({ Color3.fromRGB(255, 90, 160), Color3.fromRGB(90, 220, 255), Color3.fromRGB(255, 220, 90) }) do
+			local e = VFX.MakeEmitter("Rise", c, a, 3)
+			e.Shape = Enum.ParticleEmitterShape.Cylinder
+			e.ShapeStyle = Enum.ParticleEmitterShapeStyle.Surface
+			e.Size = VFX.NS(0, 0.3 + i * 0.05, 1, 0)
+		end
+	end
+
+	-- Mythic / Celestial weapon aura
+	local def, rarity = Stats.Weapon(player)
+	if rarity.Aura then
+		local a = attachment(root, "Cos_Mythic", Vector3.new(0, -1.2, 0))
+		local color = def.Glow or rarity.Color
+		local e = VFX.MakeEmitter("Aura", color, a, 22)
+		e.Transparency = VFX.NS(0, 0.5, 0.6, 0.6, 1, 1)
+		VFX.MakeEmitter("Sparks", color, a, 6).Speed = NumberRange.new(3, 8)
+	end
+
 	Cosmetics.RefreshTransform(player)
 end
 

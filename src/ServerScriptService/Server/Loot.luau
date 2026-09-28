@@ -11,7 +11,7 @@ local Format = require(Shared:WaitForChild("Format"))
 local DataService = require(script.Parent:WaitForChild("DataService"))
 local Stats = require(script.Parent:WaitForChild("Stats"))
 local Net = require(script.Parent:WaitForChild("Net"))
-local Sword = require(script.Parent:WaitForChild("Sword"))
+local Weapons = require(script.Parent:WaitForChild("Weapons"))
 
 local Loot = {}
 
@@ -91,7 +91,7 @@ function Loot.Forge(player: Player, oreId: string?, silent: boolean?): number
 	data.Blade += gained
 	local _, tierBefore = Config.GetBladeTier(before)
 	local tier, tierAfter = Config.GetBladeTier(data.Blade)
-	Sword.Refresh(player, data.Blade)
+	Weapons.Refresh(player)
 	DataService.MarkDirty(player)
 	if not silent then
 		Net.FX(player, "Forge", {
@@ -122,8 +122,8 @@ function Loot.AddOre(player: Player, oreId: string, count: number): boolean
 		data.Blade += gained
 		local _, tb = Config.GetBladeTier(before)
 		local tier, ta = Config.GetBladeTier(data.Blade)
-		Sword.Refresh(player, data.Blade)
 		if ta > tb or math.floor(data.Blade / 10) > math.floor(before / 10) then
+			Weapons.Refresh(player)
 			Net.FX(player, "Forge", { Gained = gained, From = before, To = data.Blade, Ores = { [oreId] = count }, TierUp = ta > tb and ta or nil, TierName = tier.Name, Milestone = true, Auto = true })
 		end
 		DataService.MarkDirty(player)

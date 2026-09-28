@@ -24,6 +24,14 @@ for key, pass in pairs(Config.GamePasses) do
 		passKeyById[pass.Id] = key
 	end
 end
+-- 2x power tiers: product id -> tier number n (price 3^n, multiplier 2^n)
+local powerTierById = {}
+for n, tier in ipairs(Config.PowerTiers) do
+	if tier.Id and tier.Id ~= 0 then
+		powerTierById[tier.Id] = n
+	end
+end
+
 local productKeyById = {}
 for key, prod in pairs(Config.Products) do
 	if prod.Id and prod.Id ~= 0 then
@@ -104,6 +112,41 @@ function Monetization.PromptProduct(player: Player, key: string)
 	MarketplaceService:PromptProductPurchase(player, prod.Id)
 end
 
+-- Prompts the NEXT power tier only (n = PowerTier + 1).
+function Monetization.PromptPowerTier(player: Player)
+	local data = DataService.Get(player)
+	if not data then
+		return
+	end
+	local n = data.PowerTier + 1
+	local tier = Config.PowerTiers[n]
+	if not tier then
+		Net.Notify(player, "You own every Power tier!", Color3.fromRGB(255, 215, 80), "Error")
+		return
+	end
+	if not tier.Id or tier.Id == 0 then
+		Net.Notify(player, "Power tier " .. n .. " isn't set up yet (add its product ID in Config.PowerTiers).", Color3.fromRGB(255, 170, 90), "Error")
+		return
+	end
+	MarketplaceService:PromptProductPurchase(player, tier.Id)
+end
+
+local function grantPowerTier(player: Player, data, n: number): string
+	local expected = data.PowerTier + 1
+	if n >= expected then
+		-- normal case (n == expected). If a higher tier was bought (paid more),
+		-- jump straight to it so no Robux is ever wasted.
+		data.PowerTier = n
+		Net.FX(player, "PowerTier", { Tier = n, Mult = Config.PowerTierMult(n) })
+		return "Power x" .. Format.Abbrev(Config.PowerTierMult(n))
+	end
+	-- stale purchase of a tier the player already owns: compensate with coins
+	local coins = 1000 * Config.PowerTierPrice(n) * (1 + data.Rebirths)
+	data.Coins += coins
+	Net.Notify(player, "You already had Power tier " .. n .. " - converted to " .. Format.Abbrev(coins) .. " Coins.", Color3.fromRGB(255, 215, 80), "Purchase")
+	return Format.Abbrev(coins) .. " Coins"
+end
+
 MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, passId, purchased)
 	if not purchased then
 		return
@@ -132,6 +175,20 @@ MarketplaceService.ProcessReceipt = function(receipt)
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
 	end
+	-- 2x power tier purchase
+	local tierN = powerTierById[receipt.ProductId]
+	if tierN then
+		local text = grantPowerTier(player, data, tierN)
+		table.insert(data.Receipts, receipt.PurchaseId)
+		while #data.Receipts > 50 do
+			table.remove(data.Receipts, 1)
+		end
+		DataService.MarkDirty(player)
+		DataService.Save(player)
+		Net.FX(player, "Purchase", { Name = "Power Tier " .. tierN, Text = text })
+		return Enum.ProductPurchaseDecision.PurchaseGranted
+	end
+
 	local key = productKeyById[receipt.ProductId]
 	local prod = key and Config.Products[key]
 	if not prod then

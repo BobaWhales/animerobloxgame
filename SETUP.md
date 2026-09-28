@@ -1,119 +1,184 @@
 # +1 Loot for Anime: Setup Guide
 
-A Roblox Luau game based on the *+1 Loot to Forge* loop: slay monsters, loot ore, forge it into a stronger blade, push deeper, roll your Race.
-
-The whole map (hub, train area, portals, dungeons and tower) is built by code when the server starts, so there are no models to import. There is **no VIP zone and no PvP arena**.
+A Roblox Luau anime action game: slay anime-avatar enemies, loot ore and weapons, forge, roll gacha chests, and fight with iconic anime weapons. The map, enemies and weapons are all built by code, so there are no models to import. There is **no VIP zone and no PvP arena**.
 
 ---
 
 ## Option A: open the ready-made place (easiest)
 
-1. Download `build/PlusOneLootForAnime.rbxlx`.
-2. Double-click it (or in Studio: **File → Open from File**).
+1. Download `build/PlusOneLootForAnime.rbxlx` and open it in Studio (**File → Open from File**).
+2. It already has **Lighting.Technology = Future** and the **2022 PBR materials** turned on.
 3. Do the **UIPackPlus** step below, then press **Play**.
 
-## Option B: copy and paste into your own place
+To move everything into your own place, open both places and copy these three objects across in the Explorer (right-click → Copy, then right-click the service → Paste Into):
+- `GameShared` → ReplicatedStorage
+- `Server` → ServerScriptService
+- `Client` → StarterPlayerScripts
 
-Create these objects in Studio **with these exact names and types**, then paste each file's contents into the matching script.
+## Option B: copy and paste file by file
 
-> Before pasting, **delete your old map, VIP room and PvP arena** from Workspace, plus any old game scripts. The new map is built in code.
+Create these objects with **these exact names and types**, then paste each file's contents in. Each file's first lines also say where it goes.
 
 ```
 ReplicatedStorage
-└── GameShared                (Folder)
-    ├── Config                (ModuleScript)  <- src/ReplicatedStorage/GameShared/Config.luau
-    ├── Format                (ModuleScript)  <- .../Format.luau
-    ├── SFX                   (ModuleScript)  <- .../SFX.luau
-    ├── UITheme               (ModuleScript)  <- .../UITheme.luau
-    └── VFX                   (ModuleScript)  <- .../VFX.luau
+└── GameShared              (Folder)
+    ├── Config              (ModuleScript)
+    ├── Format              (ModuleScript)
+    ├── SFX                 (ModuleScript)
+    ├── UITheme             (ModuleScript)
+    ├── VFX                 (ModuleScript)
+    └── WeaponModels        (ModuleScript)
 
 ServerScriptService
-└── Server                    (Script)        <- src/ServerScriptService/Server/init.server.luau
-    ├── Actions               (ModuleScript)  <- .../Actions.luau
-    ├── Combat                (ModuleScript)
-    ├── Cosmetics             (ModuleScript)
-    ├── DataService           (ModuleScript)
-    ├── EnemyService          (ModuleScript)
-    ├── Loot                  (ModuleScript)
-    ├── MapBuilder            (ModuleScript)
-    ├── Monetization          (ModuleScript)
-    ├── Net                   (ModuleScript)
-    ├── Stats                 (ModuleScript)
-    ├── Sword                 (ModuleScript)
-    ├── TowerService          (ModuleScript)
-    └── Util                  (ModuleScript)
+└── Server                  (Script)       <- init.server.luau
+    ├── Actions  Combat  Cosmetics  DataService  EnemyService
+    ├── Loot  MapBuilder  Monetization  Net  Playtime  Projectiles
+    └── Stats  TowerService  Util  Weapons          (all ModuleScripts)
 
 StarterPlayer
 └── StarterPlayerScripts
-    └── Client                (LocalScript)   <- src/StarterPlayer/StarterPlayerScripts/Client/init.client.luau
-        ├── Drops             (ModuleScript)  <- .../Drops.luau
-        └── UI                (ModuleScript)  <- .../UI.luau
+    └── Client              (LocalScript)  <- init.client.luau
+        └── Abilities  Drops  Hud  PromptUI  UI  WeaponUI   (all ModuleScripts)
 ```
 
-The ModuleScripts under `Server` go **inside** the `Server` Script, and `Drops` and `UI` go **inside** the `Client` LocalScript.
+**Two settings scripts can't change.** Roblox locks these, so set them by hand when copy-pasting:
+1. **Lighting → Technology = Future** (Explorer → Lighting → Properties).
+2. **MaterialService → Use2022Materials = true** (the modern PBR material set).
 
-Each file's first lines also say where it goes.
-
----
-
-## Using UIPackPlus for the UI
-
-1. Drag `UIPackPlus.rbxm` into the Studio viewport. It gets inserted into Workspace.
-2. Move the inserted object into **ReplicatedStorage** and rename it **`UIPackPlus`**.
-3. Press Play and open the **Output** window. It prints a line like this:
-   `[UITheme] UIPackPlus found with 42 images: BlueButton, Close, Coin, Frame, ...`
-4. Every panel, button, stat bar and icon is skinned automatically by matching image names (Panel/Frame/Window, GreenButton/Button, Close, Coin, Sword, Gem, and so on).
-   If a role picks the wrong image, open `GameShared/UITheme` and put the exact image name **first** in that role's list inside `UITheme.Templates`. For example:
-   ```lua
-   Button = { "MyGreenBtn", "GreenButton", "Button" },
-   Icon_Coins = { "CoinIcon", "Coin" },
-   ```
-If the pack isn't found, a built-in anime style is used, so the game still works.
+Also delete your old map, VIP room, PvP arena and old scripts first.
 
 ---
 
-## Things to fill in
+## UIPackPlus
 
-All of these live in **`GameShared/Config`**.
-
-| What | Where |
-|---|---|
-| Gamepass IDs | `Config.GamePasses.*.Id` (0 = not set up; the Shop shows a notice) |
-| Developer product IDs | `Config.Products.*.Id` |
-| Codes | `Config.Codes` (RELEASE, PLUSONE, ANIMEFORGE, MAINCHARACTER included) |
-| Music (optional) | `Config.Music` (paste audio IDs from the Creator Store) |
-| Replace any sound effect | `Config.SoundOverrides` (for example `Swing = "rbxassetid://123"`) |
-| Test every gamepass in Studio | `Config.StudioOwnsAllPasses = true` |
-
-**Saving:** to test DataStores in Studio, turn on *Game Settings → Security → Enable Studio Access to API Services*. Without it the game still runs, but progress isn't saved.
-
----
-
-## What's in the game
-
-**Map (laid out like +1 Loot To Forge)**
-- **Hub / spawn plaza:** Forge cauldron in the centre, Sell stall, Upgrades stall, Rebirth statue (a giant sword in stone), Race Altar, Ore Index board and a global Top Blades leaderboard. Cherry trees, lanterns, torii gates and a spinning Rift in the sky.
-- **Train Area (west):** 7 multiplier pads (x1 → x1500). Each swing trains Power, and standing on a pad auto-trains.
-- **Dungeon portals (north):** Verdant Academy Ruins (stages 1-5) and Neon Mecha Docks (stages 6-10, needs Blade +100). Sakura Underworld, Starlit Battlefront and The Rift Throne are teased as *Coming Soon*.
-- **Dungeons:** linear halls with a Power gate per stage and a boss on stages 5 and 10.
-- **Infinite Tower (east):** a private arena where you must beat the floor Guardian before a 30-second timer runs out. Rewards are Coins, ore and Runes (+2% damage each).
-
-**Systems**
-- **Ore → Forge → +Blade:** 7 ores from Common to Rift-forged. Rare ores forge in big chunks (+25, +100, +1000). The blade model upgrades at 10 visual tiers, and its "+N" level is etched on the blade.
-- **Races:** Pirate 32%, Ninja 27%, Assassin 18%, Sorcerer 12%, Isekai 7%, Saiyan 3.9% and Main Character 0.1%. Each has a working passive (crit, first-strike, AoE every 5th swing, Zenkai, Plot Armor, and so on) plus a 5-tier skin roll.
-- **Overdrive:** a transformation buff (+100% damage, +30% speed, +50% Power) with a full transformation sequence.
-- **Other systems:** Backpack / Luck / Training upgrades, Rebirth (Ascension auras), Ore Index rewards, golden Elite spawns and boss ground-slams with telegraphs.
-- **Monetization:** gamepasses, developer products with receipt de-duplication, and codes.
-
-**VFX:** curved slash arcs, sword trails, hit sparks and crit bursts, pop-up damage numbers, white hit-flash on enemies, shattering death bursts, shockwave rings, light pillars, impact frames, speed lines, camera shake, FOV punch, anime title cards, loot beams on rare drops, and ore and coin icons that fly into the HUD.
-
-**SFX:** about 40 layered sound cues (slash, hit, crit, kill, boss kill, ore pickup by rarity, forge, tier-up, sell, rebirth, race roll ticks and reveal, Overdrive "power chord", boss slam, tower win and lose, and UI sounds). They use sounds built into Roblox, so nothing needs uploading. Classic sword sounds fall back automatically if they're unavailable.
+1. Drag `UIPackPlus.rbxm` into Studio.
+2. Move it into **ReplicatedStorage** and name it **`UIPackPlus`**.
+3. Press Play. The Output window lists every image it found. If something picks the wrong image, put the right image's name first in its list in `GameShared/UITheme → UITheme.Templates`.
 
 ---
 
 ## Controls
-- **Click / tap**: swing your blade (trains Power and hits enemies).
-- **E** at the Forge cauldron: smelt all your ore into Blade levels.
-- **E** at the other stalls: Sell / Upgrades / Rebirth / Race / Index.
-- Left menu: Shop, Upgrade, Race, Index, Bag, Travel, Rebirth, Settings.
-- Right side: **HUB** (free teleport home) and **OVERDRIVE**.
+
+| Action | Keyboard / mouse | Controller | Mobile |
+|---|---|---|---|
+| Basic attack / combo (hold) | **LMB** | RT | Attack button |
+| Dash (short i-frames) | **Q** | B | Dash button |
+| Weapon skill (hold for charge skills) | **E** | X | Skill button |
+| Ultimate | **R** | Y | Ult button |
+| Overdrive transformation | **C** | LB | OD button |
+| Health potion | H | – | – |
+| Interact (custom prompts) | **F** | D-pad Up | Tap the prompt |
+
+Prompts use **F** instead of E because E is the weapon skill. You can also tap or click the hotbar slots.
+
+---
+
+## What's in the spec, and where it lives
+
+**1. Custom proximity prompts** (`Client/PromptUI`, `MapBuilder`, `Actions`)
+- Every prompt uses `Style = Custom`, `MaxActivationDistance = 10`, and `RequiresLineOfSight` from `Config.Prompt`.
+  - Line of sight is **off** by default because the forge prompt sits inside the cauldron rim.
+- The client draws an AlwaysOnTop BillboardGui with a CanvasGroup that fades in on `PromptShown` and out on `PromptHidden`, using TweenService.
+- The key label follows your current device (Keyboard / Controller / Touch) and updates live. Touch players tap the key.
+- `Triggered` fires `Remotes.Interact`. The server checks the prompt, the distance and the action before doing anything.
+
+**2. Graphics** (`MapBuilder.buildLighting`, `Config.Graphics`)
+- Technology Future (set in the place file).
+- Atmosphere: Density 0.35, Haze 2.5, tinted colors.
+- Bloom: Threshold 0.75, Size 28, Intensity 0.5.
+- ColorCorrection: Contrast 0.18, Saturation 0.25.
+- SunRays: Intensity 0.2, Spread 0.8.
+- Depth of field blurs the world whenever a menu or the shop is open.
+- Shadow-casting lights at the forge, altar, statue, portals, lanterns, tower and chest shrine.
+- Ambient particles: floating energy motes and falling cherry blossoms in the hub, fireflies in Zone 1, dark aura trails in Zone 2.
+- Optional custom PBR `MaterialVariant`s: paste texture IDs in `Config.Graphics.MaterialVariants`.
+
+**3. Anime weapons and combat** (`Config.Weapons / Skills / WeaponClasses`, `Combat`, `Projectiles`, `WeaponModels`)
+
+| Weapon | Class | Tier | E skill |
+|---|---|---|---|
+| Starrk's Guns | Dual pistols | Mythic | **Cero Metralleta**: 26-shot cone barrage. Basic attacks fire server-raycast energy rays. |
+| Zangetsu | Greatsword | Mythic | **Getsuga Tensho**: piercing crescent wave. Basic attack is a 4-hit heavy combo. |
+| Rasengan | Glove | Legendary | Hold to charge an orb, then lunge. Heavy knockback, 5 damage ticks, and a ragdoll on the NPC. |
+| Enma | Katana | Legendary | Hell Dragon |
+| Shusui | Katana | Epic | Black Blade Rush |
+| Spirit Gun | Finger pistol | Epic | Charged piercing blast |
+| Dimensional Scythe | Scythe | Legendary | Dimensional Rift: a vortex that pulls enemies in |
+
+- There are 25 weapons in total across 6 classes. Each class has its own **R** ultimate.
+- **Balance nerfs** live in `Config.Balance`:
+  - Every cooldown is **+25%**.
+  - Stamina costs are **+30%**.
+  - Dash i-frames are cut to **0.18s**.
+  - Stuns are capped at **1.2s** on enemies and **0.5s** on players.
+  - Crits are capped at **2.5x**.
+  - All gameplay damage multipliers combined are **hard-capped at 40x**.
+
+**4. Rarity and loot** (`Config.WeaponRarities`, `Weapons`)
+
+| Rarity | Drop rate | Bonus |
+|---|---|---|
+| Common | 50% | +5% damage |
+| Uncommon | 30% | +15% |
+| Rare | 13% | +35%, +5% attack speed |
+| Epic | 5% | +75%, particle trail |
+| Legendary | 1.8% | +150%, unique passive |
+| Mythic / Celestial | 0.2% | +300%, aura, signature skill |
+
+- Rolls use `Random.new()` weighted tables on the server, for both enemy drops and gacha chests.
+- Chest types: the coin **Weapon Chest**, plus **Uncommon**, **Rare+ Scroll** and **Legendary** chests that use keys.
+- The chest shrine is in the hub, and the **Chests** menu works anywhere.
+
+**5. Play-time rewards and streaks** (`Playtime`, `Hud`)
+- The server counts session time every second. A timer widget in the bottom-left shows progress to the next reward.
+
+| Session time | Reward |
+|---|---|
+| 5 min | 100 Coins + Health Potion |
+| 15 min | Uncommon Chest Key |
+| 30 min | 2x Damage for 15 minutes |
+| 60 min | Rare+ Spin Scroll |
+| 120 min | Exclusive Playtime Aura + Legendary Chest Key |
+
+- The daily streak, total play time and last login day are saved in the DataStore.
+- Each streak day adds +5% Coins (up to +50%) and pays out more Coins each day. Every 7th day in a row also gives a Rare+ Scroll.
+
+**6. Anime avatar enemies** (`EnemyService`)
+- Each enemy is an R15 rig built from a `HumanoidDescription`, with procedural anime hair and accessories (spiky, long or bun hair; headband, horns, mask, crown or visor).
+  - Add real catalog hair, accessory, Shirt and Pants IDs in `Config.EnemyCatalog`.
+  - If the R15 rig can't be built, a hand-built R6 rig is used instead.
+- Animations (Idle, Walk, Run, BasicAttack, SpecialWindup, SpecialRelease) are preloaded into an `Animator`. The defaults are Roblox's own animations; swap in yours via `Config.EnemyAnims`.
+- `PathfindingService` handles chasing. A state machine runs special attacks:
+  1. Check the cooldown and distance.
+  2. Play the wind-up animation plus a red ground telegraph (a circle for boss slams, a line for lunges).
+  3. Release. Damage lands on the animation's **"Hit" keyframe or marker** (`KeyframeReached` / `GetMarkerReachedSignal`). Roblox's default animations have no "Hit" marker, so a timed fallback is used until you upload your own.
+- Health bars sit over the head and only show when an enemy was recently damaged or a player is in aggro range.
+
+**7. 2x Power purchases** (`Monetization`, `WeaponUI` Power panel)
+- Tier *n* costs **3ⁿ Robux** (3, 9, 27, 81…) and sets your damage multiplier to **2ⁿ**.
+- Create one Developer Product per tier at the matching price and paste the IDs into `Config.PowerTiers` (8 tiers, up to 6,561 Robux).
+- `ProcessReceipt` checks the product against the player's next tier, then sets `PowerTier`, saves, and returns `PurchaseGranted`.
+  - If a player somehow buys a higher tier, they jump to that tier.
+  - If they buy a tier they already own, it's converted to Coins, so no Robux is ever lost.
+- The Power multiplier is applied **after** the 40x gameplay cap.
+- The shop shows the current multiplier, the next one, and the exact Robux price.
+
+**Kept from before:** hub map laid out like +1 Loot To Forge, ore → Forge levels, races, Overdrive, rebirth, the Infinite Tower, the Index, codes, gamepasses, layered SFX and anime VFX.
+
+---
+
+## Things to fill in (`GameShared/Config`)
+
+| What | Where |
+|---|---|
+| Power tier product IDs (3, 9, 27… Robux) | `Config.PowerTiers[n].Id` |
+| Gamepass / other product IDs | `Config.GamePasses`, `Config.Products` |
+| Enemy catalog hair / clothes (optional) | `Config.EnemyCatalog` |
+| Custom enemy / player animations (optional) | `Config.EnemyAnims`, `Config.PlayerAnims` |
+| PBR texture maps (optional) | `Config.Graphics.MaterialVariants` |
+| Music (optional) | `Config.Music` |
+| Rename weapons | `Config.Weapons` (`Name` field) |
+
+**Saving in Studio:** turn on *Game Settings → Security → Enable Studio Access to API Services*.
+
+**Heads-up on names:** Zangetsu, Starrk, Getsuga Tensho, Cero Metralleta, Rasengan, Enma, Shusui and Spirit Gun belong to existing anime (Bleach, Naruto, One Piece, Yu Yu Hakusho). Plenty of Roblox games use names like these, but they can draw takedown requests. Every name is one field in `Config.Weapons` / `Config.Skills` if you ever need to rename them.

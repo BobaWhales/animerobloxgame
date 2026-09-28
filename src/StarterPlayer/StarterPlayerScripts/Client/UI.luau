@@ -233,7 +233,7 @@ local function sideButton(parent, text: string, icon: string, color: string, ord
 		Text = text,
 		Icon = icon,
 		Color = color,
-		Size = UDim2.fromOffset(84, 84),
+		Size = UDim2.fromOffset(72, 72),
 		Order = order,
 		MaxText = 16,
 		OnClick = onClick,
@@ -311,6 +311,23 @@ local function makePanel(name: string, title: string, size: Vector2, accent: Col
 	return panel
 end
 
+-- Depth of field blur behind menus / shop / dialogue.
+local dof: DepthOfFieldEffect? = nil
+function UI.SetMenuFocus(on: boolean)
+	local cfg = Config.Graphics.MenuDepthOfField
+	if not dof then
+		local d = Instance.new("DepthOfFieldEffect")
+		d.Name = "MenuFocus"
+		d.FarIntensity = 0
+		d.NearIntensity = 0
+		d.FocusDistance = cfg.FocusDistance
+		d.InFocusRadius = cfg.InFocusRadius
+		d.Parent = game:GetService("Lighting")
+		dof = d
+	end
+	tween(dof, 0.3, { FarIntensity = on and cfg.FarIntensity or 0, NearIntensity = on and cfg.NearIntensity or 0 })
+end
+
 function UI.Open(name: string, mode: string?)
 	local panel = panels[name]
 	if not panel then
@@ -327,6 +344,7 @@ function UI.Open(name: string, mode: string?)
 	tween(panel.Scale, 0.3, { Scale = 1 }, Enum.EasingStyle.Back)
 	dim.Visible = true
 	tween(dim, 0.25, { BackgroundTransparency = 0.55 })
+	UI.SetMenuFocus(true)
 	if panel.Refresh and UI.Data then
 		panel.Refresh(UI.Data)
 	end
@@ -351,6 +369,7 @@ function UI.Close()
 			end
 		end)
 	end
+	UI.SetMenuFocus(false)
 	tween(dim, 0.2, { BackgroundTransparency = 1 }).Completed:Once(function()
 		if not current then
 			dim.Visible = false
@@ -1006,11 +1025,11 @@ function UI.Init(requestFn)
 	makePill(top, "Rebirths", "Icon_Rebirth", Color3.fromRGB(210, 150, 255), 6)
 
 	-- left menu
-	local left = frame(root, { Transparency = 1, Size = UDim2.fromOffset(186, 380), Position = UDim2.new(0, 14, 0.5, 20), AnchorPoint = Vector2.new(0, 0.5) })
+	local left = frame(root, { Transparency = 1, Size = UDim2.fromOffset(160, 480), Position = UDim2.new(0, 14, 0.5, -10), AnchorPoint = Vector2.new(0, 0.5) })
 	left.Name = "LeftMenu"
 	local grid = Instance.new("UIGridLayout")
-	grid.CellSize = UDim2.fromOffset(84, 84)
-	grid.CellPadding = UDim2.fromOffset(10, 10)
+	grid.CellSize = UDim2.fromOffset(72, 72)
+	grid.CellPadding = UDim2.fromOffset(8, 8)
 	grid.SortOrder = Enum.SortOrder.LayoutOrder
 	grid.Parent = left
 	sideButton(left, "Shop", "Icon_Shop", "Green", 1, function()
@@ -1034,8 +1053,20 @@ function UI.Init(requestFn)
 	sideButton(left, "Rebirth", "Icon_Rebirth", "Gold", 7, function()
 		UI.Toggle("Rebirth")
 	end)
-	sideButton(left, "Settings", "Icon_Settings", "Red", 8, function()
+	sideButton(left, "Settings", "Icon_Settings", "Red", 12, function()
 		UI.Toggle("Settings")
+	end)
+	sideButton(left, "Weapons", "Icon_Blade", "Purple", 0, function()
+		UI.Toggle("Weapons")
+	end)
+	sideButton(left, "Chests", "Icon_Gem", "Gold", 8, function()
+		UI.Toggle("Chests")
+	end)
+	sideButton(left, "Power", "Icon_Power", "Red", 9, function()
+		UI.Toggle("Power")
+	end)
+	sideButton(left, "Rewards", "Icon_Tower", "Green", 10, function()
+		UI.Toggle("Rewards")
 	end)
 
 	-- right side: hub + overdrive
@@ -1090,6 +1121,27 @@ function UI.Init(requestFn)
 	buildTeleport()
 	buildRebirth()
 	buildSettings()
+end
+
+-- Helpers for the other client UI modules (Hud, WeaponUI).
+UI.Helpers = {
+	Frame = frame,
+	List = list,
+	Scroller = scroller,
+	Clear = clearList,
+	Tween = tween,
+	Row = rowFrame,
+	MakePanel = makePanel,
+	Hex = hex,
+}
+function UI.Root()
+	return root
+end
+function UI.FlyGui()
+	return flyGui
+end
+function UI.Panel(name: string)
+	return panels[name]
 end
 
 return UI

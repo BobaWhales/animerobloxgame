@@ -1,7 +1,8 @@
 --!nonstrict
 -- Client (LocalScript) -> StarterPlayer/StarterPlayerScripts/Client
--- Put the "UI" and "Drops" ModuleScripts INSIDE this LocalScript.
--- Handles input, server FX events, world VFX/SFX, gates, pads and zones.
+-- Put the UI, Hud, WeaponUI, Abilities, PromptUI and Drops ModuleScripts
+-- INSIDE this LocalScript. Handles server FX events, world VFX/SFX, gates,
+-- pads and zones.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -18,10 +19,15 @@ local SFX = require(Shared:WaitForChild("SFX"))
 
 local UI = require(script:WaitForChild("UI"))
 local Drops = require(script:WaitForChild("Drops"))
+local Abilities = require(script:WaitForChild("Abilities"))
+local Hud = require(script:WaitForChild("Hud"))
+local WeaponUI = require(script:WaitForChild("WeaponUI"))
+local PromptUI = require(script:WaitForChild("PromptUI"))
 
 local player = Players.LocalPlayer
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
-local SwingRemote = Remotes:WaitForChild("Swing") :: RemoteEvent
+local AbilityRemote = Remotes:WaitForChild("Ability") :: RemoteEvent
+local InteractRemote = Remotes:WaitForChild("Interact") :: RemoteEvent
 local RequestRemote = Remotes:WaitForChild("Request") :: RemoteEvent
 local SyncRemote = Remotes:WaitForChild("Sync") :: RemoteEvent
 local FXRemote = Remotes:WaitForChild("FX") :: RemoteEvent
@@ -33,13 +39,21 @@ end
 VFX.Init()
 SFX.Init()
 UI.Init(request)
+WeaponUI.Init(UI, request)
+Abilities.Init(AbilityRemote, request)
+Hud.Init(UI, Abilities)
+PromptUI.Init(InteractRemote)
 Drops.Init(request)
+
+Abilities.OnFeedback = function(kind)
+	if kind == "NoStamina" then
+		Hud.FlashStamina()
+	end
+end
 
 local data = nil
 local currentStage = 0
 local currentZone = 0
-local lastSwing = 0
-local swingFlip = false
 
 local function myRoot(): BasePart?
 	local c = player.Character
@@ -50,60 +64,21 @@ local function charOf(p: Player?): Model?
 	return p and p.Character
 end
 
+local function weaponColor(who: Player?): Color3
+	local p: Player = who or player
+	local def = Config.WeaponById[p:GetAttribute("WeaponId") or Config.StarterWeapon]
+	local r = Config.WeaponRarityById[p:GetAttribute("WeaponRarity") or "Common"]
+	return (def and def.Glow) or (r and r.Color) or Color3.fromRGB(230, 240, 255)
+end
+
 local function bladeColor(): Color3
-	local tier = Config.GetBladeTier(data and data.Blade or 0)
-	return tier.Edge or Color3.fromRGB(230, 240, 255)
+	return weaponColor(player)
 end
 
----------------------------------------------------------------------
--- SWORD INPUT (instant local feedback; server validates hits)
----------------------------------------------------------------------
-local function onSwing()
-	local t = os.clock()
-	if t - lastSwing < Config.SwingCooldown * 0.85 then
-		return
-	end
-	lastSwing = t
-	SwingRemote:FireServer()
-	local root = myRoot()
-	if not root then
-		return
-	end
-	swingFlip = not swingFlip
-	local _, tierIndex = Config.GetBladeTier(data and data.Blade or 0)
-	VFX.Slash(root.CFrame * CFrame.new(0, 0.6, 0), bladeColor(), 1 + tierIndex * 0.06, swingFlip)
-	SFX.Play("Swing", { Pitch = swingFlip and 1 or 1.08 })
-	VFX.Shake(0.03)
-end
-
-local function hookTool(tool: Instance)
-	if not tool:IsA("Tool") or not tool:GetAttribute("IsBlade") or tool:GetAttribute("Hooked") then
-		return
-	end
-	tool:SetAttribute("Hooked", true)
-	tool.Activated:Connect(onSwing)
-	tool.Equipped:Connect(function()
-		SFX.Play("Equip")
-	end)
-end
-
-local function onCharacter(char: Model)
+player.CharacterAdded:Connect(function()
 	Drops.ClearAll()
-	for _, c in ipairs(char:GetChildren()) do
-		hookTool(c)
-	end
-	char.ChildAdded:Connect(hookTool)
-	local bp = player:WaitForChild("Backpack")
-	for _, c in ipairs(bp:GetChildren()) do
-		hookTool(c)
-	end
-	bp.ChildAdded:Connect(hookTool)
 	currentStage = -1
-end
-player.CharacterAdded:Connect(onCharacter)
-if player.Character then
-	task.spawn(onCharacter, player.Character)
-end
+end)
 
 ---------------------------------------------------------------------
 -- GATES (opened locally when you meet the Power requirement)
@@ -164,15 +139,23 @@ end)
 ---------------------------------------------------------------------
 local FX = {}
 
-FX.Swing = function(p)
+local SWING_SOUND = { Katana = "Swing", Greatsword = "HeavySwing", Scythe = "ScytheSwing", Glove = "Punch", Pistols = "GunShot", FingerGun = "SpiritShot" }
+
+-- Basic attacks of OTHER players (yours are drawn instantly by Abilities).
+FX.Attack = function(p)
 	local char = charOf(p.Player)
 	local root = char and char:FindFirstChild("HumanoidRootPart")
 	if not root then
 		return
 	end
 	if p.Player ~= player then
-		VFX.Slash(root.CFrame * CFrame.new(0, 0.6, 0), p.Color, 1, math.random() < 0.5)
-		SFX.Play("Swing", { At = root.Position, Volume = 0.6 })
+		local class = Config.WeaponClasses[p.Class]
+		if class and class.Kind == "Melee" then
+			VFX.Slash(root.CFrame * CFrame.new(0, 0.6, 0), p.Color, class.Range / 9, p.Combo % 2 == 0)
+		elseif p.Dir then
+			VFX.Muzzle(root.Position + Vector3.new(0, 1.2, 0) + p.Dir * 2, p.Dir, p.Color)
+		end
+		SFX.Play(SWING_SOUND[p.Class] or "Swing", { At = root.Position, Volume = 0.6 })
 	end
 	if p.Heavy then
 		local ground = root.Position - Vector3.new(0, 2.8, 0)
@@ -470,6 +453,266 @@ FX.Upgraded = function(p)
 	end
 end
 
+---------------------------------------------------------------------
+-- ABILITIES / PROJECTILES
+---------------------------------------------------------------------
+local SKILL_SOUND = {
+	GetsugaTensho = "Getsuga",
+	CeroMetralleta = "BigBlast",
+	SpiritGun = "BigBlast",
+	ChargedShot = "BigBlast",
+	DimensionalRift = "Vortex",
+	Reap = "Vortex",
+	VoidHarvest = "Vortex",
+	HellDragon = "Getsuga",
+	BlackBladeRush = "HeavySwing",
+	IaidoDash = "HeavySwing",
+	ChakraPalm = "Punch",
+	GroundCleave = "BossSlam",
+	StormCleave = "BossSlam",
+	BurstFire = "GunShot",
+}
+
+FX.Dash = function(p)
+	if p.Player == player then
+		return
+	end
+	local char = charOf(p.Player)
+	if char then
+		VFX.Afterimage(char, weaponColor(p.Player))
+		local root = char:FindFirstChild("HumanoidRootPart")
+		if root then
+			SFX.Play("Dash", { At = root.Position, Volume = 0.6 })
+		end
+	end
+end
+
+FX.Charge = function(p)
+	if p.Player == player then
+		return
+	end
+	local char = charOf(p.Player)
+	local hand = char and (char:FindFirstChild("RightHand") or char:FindFirstChild("Right Arm"))
+	if hand then
+		local def = Config.WeaponById[p.Player:GetAttribute("WeaponId") or ""]
+		local skill = def and Config.Skills[p.Slot == "E" and def.Skill or ""]
+		local orb = VFX.ChargeOrb(hand, Vector3.new(0, -0.9, 0), skill and skill.Color or weaponColor(p.Player), 2.2, skill and skill.Charge or 1.5)
+		task.delay(skill and skill.Charge or 1.5, orb.Destroy)
+	end
+end
+
+FX.Skill = function(p)
+	local skill = Config.Skills[p.Skill]
+	if not skill then
+		return
+	end
+	local char = charOf(p.Player)
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local isLocal = p.Player == player
+	local pos = root and root.Position or p.Pos
+	local color = skill.Color
+	local dir = p.Dir or Vector3.new(0, 0, -1)
+	local flatDir = Vector3.new(dir.X, 0, dir.Z)
+	flatDir = flatDir.Magnitude > 0.01 and flatDir.Unit or Vector3.new(0, 0, -1)
+
+	if skill.Type == "Cone" then
+		local hits = skill.Hits or 1
+		task.spawn(function()
+			for i = 1, hits do
+				local r = char and char:FindFirstChild("HumanoidRootPart")
+				local o = r and r.Position or pos
+				VFX.ConeSwipe(CFrame.lookAt(o, o + flatDir) * CFrame.new(0, 0.6, 0), skill.Range, color)
+				if i < hits then
+					task.wait(skill.Interval or 0.1)
+				end
+			end
+		end)
+	elseif skill.Type == "Nova" then
+		local hits = skill.Hits or 1
+		task.spawn(function()
+			for i = 1, hits do
+				local r = char and char:FindFirstChild("HumanoidRootPart")
+				VFX.Nova(r and r.Position or pos, skill.Radius, color)
+				if skill.Pull then
+					VFX.Zone((r and r.Position or pos) - Vector3.new(0, 2.8, 0), skill.Radius * 0.6, 0.5, color)
+				end
+				if i < hits then
+					task.wait(skill.Interval or 0.12)
+				end
+			end
+		end)
+	elseif skill.Type == "DashStrike" or skill.Type == "ChargeLunge" then
+		if p.Finish then
+			task.delay(0.05, function()
+				VFX.Streak(p.Pos, p.Finish, color, skill.Width * 0.3)
+				VFX.Slash(CFrame.lookAt(p.Finish, p.Finish + flatDir), color, 1.6, math.random() < 0.5)
+			end)
+		end
+		if char and not isLocal then
+			VFX.Afterimage(char, color)
+		end
+	elseif skill.Type == "Zone" and p.Target then
+		VFX.Zone(p.Target, skill.Radius, p.Duration or 2.5, color)
+	elseif skill.Type == "Rain" and p.Target then
+		VFX.Ring(p.Target, color, skill.Radius, 0.6)
+	end
+
+	SFX.Play(p.Slot == "R" and "Ultimate" or (SKILL_SOUND[p.Skill] or "HeavySwing"), { At = not isLocal and pos or nil })
+	if isLocal then
+		local def = Config.WeaponById[player:GetAttribute("WeaponId") or ""]
+		local rarity = Config.WeaponRarityById[player:GetAttribute("WeaponRarity") or "Common"]
+		-- anime call-out for ultimates and signature skills
+		if p.Slot == "R" or (rarity and rarity.Index >= 5) then
+			VFX.ImpactFrame(color, p.Slot == "R" and 1.2 or 0.8)
+			VFX.TitleCard(skill.Name:upper() .. "!", def and def.Name or nil, color, 1.1)
+		else
+			VFX.Shake(0.2)
+			if root then
+				VFX.TextPop(root.Position + Vector3.new(0, 3, 0), skill.Name, color, 1.1)
+			end
+		end
+	end
+end
+
+local lastProjSound = 0
+FX.Proj = function(p)
+	VFX.StartProjectile(p.Id, p.Kind, p.Pos, p.Dir, p.Speed, p.Range, p.Color or Color3.new(1, 1, 1), p.Size)
+	local t = os.clock()
+	if t - lastProjSound > 0.06 then
+		lastProjSound = t
+		local cue = p.Kind == "Cero" and "CeroShot" or (p.Kind == "Orb" and "SpiritShot" or (p.Kind == "Ray" and "GunShot" or nil))
+		if cue then
+			SFX.Play(cue, { At = p.Pos, Volume = 0.7 })
+		end
+	end
+end
+
+FX.ProjEnd = function(p)
+	VFX.EndProjectile(p.Id, p.Pos, p.Hit, p.Explode)
+	if p.Explode then
+		SFX.Play("BigBlast", { At = p.Pos })
+	end
+end
+
+FX.Impact = function(p)
+	local color = p.Color or Color3.new(1, 1, 1)
+	if p.Kind == "Rasengan" then
+		VFX.Explosion(p.Pos, color, 1.3)
+		VFX.Zone(p.Pos - Vector3.new(0, 2.5, 0), p.Radius or 10, 0.4, color)
+		VFX.ShardRing(p.Pos, color, 22, 20, 0.5)
+		SFX.Play("RasenganHit", { At = p.Pos })
+		local root = myRoot()
+		if root and (root.Position - p.Pos).Magnitude < 60 then
+			VFX.Shake(0.45)
+		end
+	elseif p.Kind == "Rain" then
+		VFX.Pillar(p.Pos - Vector3.new(0, 1, 0), color, 40, 2.5, 0.5)
+		VFX.Emit(p.Pos, "Sparks", 14, color)
+		VFX.Ring(p.Pos, color, p.Radius or 7, 0.35)
+		SFX.Play("Hit", { At = p.Pos, Volume = 0.6 })
+	elseif p.Kind == "Burn" then
+		VFX.Emit(p.Pos, "Fire", 6, color)
+	else
+		VFX.Explosion(p.Pos, color, 0.8)
+	end
+end
+
+FX.Cooldown = function(p)
+	Abilities.SetCooldown(p.Slot, p.Duration)
+end
+
+FX.AbilityFail = function()
+	SFX.Play("Error", { Volume = 0.4 })
+end
+
+FX.NoStamina = function()
+	SFX.Play("NoStamina")
+	Hud.FlashStamina()
+end
+
+FX.Potion = function()
+	SFX.Play("Potion")
+	local char = player.Character
+	if char then
+		VFX.LevelBurst(char, Color3.fromRGB(120, 255, 140))
+	end
+end
+
+---------------------------------------------------------------------
+-- ENEMY TELEGRAPHS
+---------------------------------------------------------------------
+FX.EnemyWindup = function(p)
+	if p.Kind == "Slam" then
+		VFX.Telegraph(p.Pos, p.Radius, p.Time)
+	else
+		VFX.TelegraphLine(p.Pos, p.Dir, p.Length, 9, p.Time)
+	end
+	local model = p.Model
+	local head = model and model:FindFirstChild("Head")
+	if head then
+		VFX.Emit(head.Position, "Glow", 1, Color3.fromRGB(255, 60, 60))
+		VFX.Emit(head.Position, "Rise", 12, p.Color or Color3.fromRGB(255, 80, 80))
+	end
+	SFX.Play("EnemyWindup", { At = p.Pos })
+end
+
+FX.EnemyLunge = function(p)
+	VFX.Streak(p.From, p.To, Color3.fromRGB(255, 70, 70), 2)
+	SFX.Play("HeavySwing", { At = p.From, Pitch = 0.8 })
+end
+
+---------------------------------------------------------------------
+-- LOOT / RETENTION / MONETIZATION
+---------------------------------------------------------------------
+FX.Equipped = function(p)
+	SFX.Play("Equip")
+	local def = Config.WeaponById[p.Weapon]
+	local r = Config.WeaponRarityById[p.Rarity]
+	if def and r then
+		UI.Notify("Equipped " .. def.Name .. " (" .. (r.Label or r.Id) .. ")", r.Color)
+	end
+	local char = player.Character
+	if char then
+		VFX.LevelBurst(char, r and r.Color or Color3.new(1, 1, 1))
+	end
+end
+
+FX.WeaponDrop = function(p)
+	local r = Config.WeaponRarityById[p.Rarity]
+	if r and r.Index >= 4 then
+		WeaponUI.Reveal(p.Weapon, p.Rarity, "WEAPON DROP!")
+	else
+		local def = Config.WeaponById[p.Weapon]
+		SFX.Play("RarePickup")
+		UI.Notify("Weapon drop: " .. (r and (r.Label or r.Id) or "") .. " " .. (def and def.Name or "?"), r and r.Color or nil)
+	end
+end
+
+FX.ChestResult = function(p)
+	WeaponUI.Reveal(p.Weapon, p.Rarity, Config.ChestById[p.Chest] and Config.ChestById[p.Chest].Name:upper() or "CHEST")
+end
+
+FX.PlaytimeReward = function(p)
+	SFX.Play("PlaytimeReward")
+	VFX.TitleCard("PLAY-TIME REWARD!", p.Minutes .. " min: " .. p.Name, Color3.fromRGB(255, 215, 80), 2)
+	UI.FlyToHud("Coins", nil, Color3.fromRGB(255, 210, 60), 6)
+end
+
+FX.Daily = function(p)
+	SFX.Play("PlaytimeReward")
+	VFX.TitleCard("DAY " .. p.Streak .. " STREAK!", p.Text .. "  |  +" .. math.floor((p.Bonus or 0) * 100 + 0.5) .. "% Coins", Color3.fromRGB(120, 220, 255), 2.4)
+end
+
+FX.PowerTier = function(p)
+	SFX.Play("PowerUp")
+	VFX.ImpactFrame(Color3.fromRGB(255, 80, 80), 1.4)
+	VFX.TitleCard("POWER x" .. Format.Abbrev(p.Mult) .. "!", "Tier " .. p.Tier .. " unlocked", Color3.fromRGB(255, 90, 90), 2.2)
+	local char = player.Character
+	if char then
+		VFX.Transform(char, Color3.fromRGB(255, 80, 80), false)
+	end
+end
+
 FXRemote.OnClientEvent:Connect(function(kind, payload)
 	local fn = FX[kind]
 	if fn then
@@ -527,6 +770,7 @@ end
 local accum = 0
 RunService.RenderStepped:Connect(function(dt)
 	UI.Tick()
+	Hud.Tick()
 	local root = myRoot()
 	Drops.Step(dt, root)
 
@@ -552,6 +796,7 @@ RunService.RenderStepped:Connect(function(dt)
 		return
 	end
 	accum = 0
+	WeaponUI.Tick()
 
 	-- training pad indicator
 	local padMult, padLocked = nil, false

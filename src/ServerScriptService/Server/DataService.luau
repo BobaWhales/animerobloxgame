@@ -43,6 +43,19 @@ local DEFAULT = {
 	StarterPack = false,
 	Receipts = {}, -- recent purchase ids (dedupe)
 	Settings = { Music = true, SFX = true },
+	-- weapons / loot
+	Weapons = {}, -- ["w1"] = { W = weaponId, R = rarityId }
+	NextWeaponId = 1,
+	Equipped = "",
+	Keys = { Uncommon = 0, RareScroll = 0, Legendary = 0 },
+	Potions = 1,
+	BoostEnds = 0, -- 2x damage boost end (server time)
+	PowerTier = 0, -- purchased 2x power tiers (multiplier = 2^PowerTier)
+	-- retention
+	TotalPlaytime = 0,
+	LastLoginDay = 0,
+	Streak = 0,
+	Cosmetics = { PlaytimeAura = false },
 }
 
 local profiles: { [Player]: any } = {}
@@ -86,6 +99,18 @@ local function newSession()
 		LastPortal = 0,
 		Pad = 0,
 		Loaded = false,
+		-- combat
+		Stamina = Config.Balance.MaxStamina,
+		LastStaminaSpend = 0,
+		Cooldowns = {},
+		Charge = {},
+		LastAttack = 0,
+		Combo = 0,
+		LastPotion = 0,
+		StunnedUntil = 0,
+		-- retention
+		SessionTime = 0,
+		PlaytimeClaimed = {},
 	}
 end
 

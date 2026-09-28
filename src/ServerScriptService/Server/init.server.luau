@@ -15,7 +15,8 @@ local Net = require(script:WaitForChild("Net"))
 local DataService = require(script:WaitForChild("DataService"))
 local Stats = require(script:WaitForChild("Stats"))
 local MapBuilder = require(script:WaitForChild("MapBuilder"))
-local Sword = require(script:WaitForChild("Sword"))
+local Weapons = require(script:WaitForChild("Weapons"))
+local Playtime = require(script:WaitForChild("Playtime"))
 local Cosmetics = require(script:WaitForChild("Cosmetics"))
 local Loot = require(script:WaitForChild("Loot"))
 local EnemyService = require(script:WaitForChild("EnemyService"))
@@ -29,38 +30,17 @@ local Util = require(script:WaitForChild("Util"))
 -- WORLD
 ---------------------------------------------------------------------
 local map = MapBuilder.Build()
-EnemyService.Init(map)
+task.spawn(EnemyService.Init, map) -- builds enemy rigs (yields), players can join meanwhile
 TowerService.Init(map)
 Combat.Init(map)
 Actions.Init(map)
 
-Net.Swing.OnServerEvent:Connect(function(player)
-	local ok, err = pcall(Combat.Swing, player)
-	if not ok then
-		warn("[Swing]", err)
-	end
-end)
 
 ---------------------------------------------------------------------
--- PROMPTS + PORTALS
+-- PORTALS
 ---------------------------------------------------------------------
-local function openPanel(name: string, mode: string?)
-	return function(player: Player)
-		Net.FX(player, "OpenPanel", { Name = name, Mode = mode })
-	end
-end
-
-map.ForgePrompt.Triggered:Connect(function(player)
-	Actions.Handle(player, "Forge", nil)
-end)
-map.SellPrompt.Triggered:Connect(openPanel("Backpack", "Sell"))
-map.UpgradePrompt.Triggered:Connect(openPanel("Upgrades"))
-map.RacePrompt.Triggered:Connect(openPanel("Race"))
-map.RebirthPrompt.Triggered:Connect(openPanel("Rebirth"))
-map.IndexPrompt.Triggered:Connect(openPanel("Index"))
-map.TowerPrompt.Triggered:Connect(function(player)
-	Actions.Handle(player, "TowerStart", nil)
-end)
+-- Prompts use Style = Custom. The client draws them (Client/PromptUI) and
+-- fires Remotes.Interact on Triggered; Actions validates and runs them.
 
 local function playerFromHit(hit: BasePart): Player?
 	local model = hit:FindFirstAncestorOfClass("Model")
@@ -125,7 +105,7 @@ DataService.OnFlush = function(player: Player)
 	if snap then
 		Net.Sync:FireClient(player, snap)
 		setStat(player, "Power", Format.Abbrev(snap.Power))
-		setStat(player, "Blade", "+" .. Format.Abbrev(snap.Blade))
+		setStat(player, "Forge", "+" .. Format.Abbrev(snap.Blade))
 		setStat(player, "Rebirths", Format.Abbrev(snap.Rebirths))
 	end
 end
@@ -133,6 +113,10 @@ end
 Monetization.OnPassesChanged = function(player: Player)
 	Cosmetics.Apply(player)
 	Actions.ApplyCharacter(player)
+end
+
+Playtime.OnCosmeticsChanged = function(player: Player)
+	Cosmetics.Apply(player)
 end
 
 EnemyService.OnZenkai = function(player: Player)
@@ -156,7 +140,8 @@ local function onCharacter(player: Player, char: Model)
 		return
 	end
 	task.wait(0.1)
-	Sword.Refresh(player, data.Blade)
+	Weapons.EnsureStarter(player)
+	Weapons.Refresh(player)
 	Cosmetics.Apply(player)
 	Actions.ApplyCharacter(player)
 end
@@ -164,7 +149,7 @@ end
 local function onPlayerAdded(player: Player)
 	local ls = Instance.new("Folder")
 	ls.Name = "leaderstats"
-	for _, name in ipairs({ "Power", "Blade", "Rebirths" }) do
+	for _, name in ipairs({ "Power", "Forge", "Rebirths" }) do
 		local v = Instance.new("StringValue")
 		v.Name = name
 		v.Value = "0"
@@ -178,6 +163,9 @@ local function onPlayerAdded(player: Player)
 
 	DataService.Load(player)
 	Monetization.LoadPasses(player)
+	Weapons.EnsureStarter(player)
+	Playtime.OnJoin(player)
+	player:SetAttribute("Stamina", Config.Balance.MaxStamina)
 	if player.Character then
 		task.spawn(onCharacter, player, player.Character)
 	end

@@ -847,4 +847,300 @@ function VFX.LevelBurst(character: Model, color: Color3)
 	VFX.Light(root.Position, color, 20, 4, 0.6)
 end
 
+---------------------------------------------------------------------
+-- COMBAT EFFECTS (projectiles, charge orbs, zones, dashes)
+---------------------------------------------------------------------
+local projectiles = {}
+local projConn: RBXScriptConnection? = nil
+
+local function crescent(holder: BasePart, width: number, color: Color3)
+	local half = math.rad(70)
+	local radius = width * 0.55
+	local a0 = arcAttachment(holder, radius, -half)
+	local am = arcAttachment(holder, radius, 0)
+	local a1 = arcAttachment(holder, radius, half)
+	local ctrl = (4 / 3) * math.tan(half / 4) * radius
+	local function mk(att0, att1, w0, w1, col, bright)
+		local b = Instance.new("Beam")
+		b.Attachment0 = att0
+		b.Attachment1 = att1
+		b.CurveSize0 = ctrl
+		b.CurveSize1 = ctrl
+		b.Width0 = w0
+		b.Width1 = w1
+		b.Segments = 20
+		b.FaceCamera = true
+		b.LightEmission = 1
+		b.LightInfluence = 0
+		b.Brightness = bright
+		b.Color = col
+		b.Parent = holder
+	end
+	mk(a0, am, 0.1, width * 0.28, ColorSequence.new(color, WHITE), 5)
+	mk(am, a1, width * 0.28, 0.1, ColorSequence.new(WHITE, color), 5)
+	mk(a0, am, 0.05, width * 0.12, CS(WHITE), 8)
+	mk(am, a1, width * 0.12, 0.05, CS(WHITE), 8)
+end
+
+local function makeProjectileVisual(kind: string, color: Color3, size: number)
+	local holder
+	if kind == "Orb" or kind == "Cero" then
+		local s = kind == "Cero" and 1.1 or size
+		holder = fxPart({ Shape = Enum.PartType.Ball, Size = Vector3.one * s, Color = color })
+		local core = fxPart({ Shape = Enum.PartType.Ball, Size = Vector3.one * s * 0.55, Color = WHITE })
+		core.Name = "Core"
+		core.Parent = holder
+		local g = VFX.MakeEmitter("Glow", color, holder, 14)
+		g.Lifetime = NumberRange.new(0.15)
+		g.Size = NS(0, s * 1.6, 1, s * 2.2)
+		VFX.MakeEmitter("Sparks", color, holder, 20).Speed = NumberRange.new(3, 8)
+		local l = Instance.new("PointLight")
+		l.Color = color
+		l.Range = 10 + s * 3
+		l.Brightness = 3
+		l.Parent = holder
+	elseif kind == "Crescent" then
+		holder = fxPart({ Size = Vector3.one * 0.2, Transparency = 1 })
+		crescent(holder, size, color)
+		VFX.MakeEmitter("Sparks", color, holder, 60).Speed = NumberRange.new(4, 12)
+		local l = Instance.new("PointLight")
+		l.Color = color
+		l.Range = 24
+		l.Brightness = 4
+		l.Parent = holder
+	else -- Ray / bullet
+		holder = fxPart({ Size = Vector3.new(0.22, 0.22, 3.5), Color = color })
+		local core = fxPart({ Size = Vector3.new(0.1, 0.1, 3.6), Color = WHITE })
+		core.Name = "Core"
+		core.Parent = holder
+	end
+	-- trail
+	local a0 = Instance.new("Attachment")
+	a0.Position = Vector3.new(0, 0.3, 0)
+	a0.Parent = holder
+	local a1 = Instance.new("Attachment")
+	a1.Position = Vector3.new(0, -0.3, 0)
+	a1.Parent = holder
+	local tr = Instance.new("Trail")
+	tr.Attachment0 = a0
+	tr.Attachment1 = a1
+	tr.Lifetime = kind == "Crescent" and 0.3 or 0.12
+	tr.LightEmission = 1
+	tr.FaceCamera = true
+	tr.Color = ColorSequence.new(WHITE, color)
+	tr.Transparency = NS(0, 0.2, 1, 1)
+	tr.WidthScale = NS(0, kind == "Crescent" and size or 1, 1, 0)
+	tr.Parent = holder
+	return holder
+end
+
+local function stepProjectiles(dt)
+	for id, p in pairs(projectiles) do
+		p.Traveled += p.Speed * dt
+		local pos = p.Origin + p.Dir * math.min(p.Traveled, p.Range)
+		local cf = CFrame.lookAt(pos, pos + p.Dir)
+		p.Holder.CFrame = cf
+		local core = p.Holder:FindFirstChild("Core")
+		if core then
+			(core :: BasePart).CFrame = cf
+		end
+		if p.Traveled >= p.Range then
+			VFX.EndProjectile(id, pos, false)
+		end
+	end
+	if next(projectiles) == nil and projConn then
+		projConn:Disconnect()
+		projConn = nil
+	end
+end
+
+function VFX.StartProjectile(id, kind: string, origin: Vector3, dir: Vector3, speed: number, range: number, color: Color3, size: number?)
+	local holder = makeProjectileVisual(kind, color, size or 1.5)
+	projectiles[id] = { Holder = holder, Origin = origin, Dir = dir.Unit, Speed = speed, Range = range, Traveled = 0, Color = color, Kind = kind }
+	holder.CFrame = CFrame.lookAt(origin, origin + dir)
+	if not projConn then
+		projConn = RunService.RenderStepped:Connect(stepProjectiles)
+	end
+end
+
+function VFX.EndProjectile(id, pos: Vector3?, hit: boolean?, explode: number?)
+	local p = projectiles[id]
+	if not p then
+		return
+	end
+	projectiles[id] = nil
+	local at = pos or p.Holder.Position
+	p.Holder.Transparency = 1
+	for _, d in ipairs(p.Holder:GetDescendants()) do
+		if d:IsA("ParticleEmitter") then
+			d.Enabled = false
+		elseif d:IsA("Beam") then
+			d.Enabled = false
+		elseif d:IsA("BasePart") then
+			d.Transparency = 1
+		end
+	end
+	Debris:AddItem(p.Holder, 0.6)
+	if hit or explode then
+		VFX.Flash(at, p.Color, explode and explode * 0.8 or (p.Kind == "Crescent" and 8 or 3), 0.2)
+		VFX.Emit(at, "Sparks", explode and 40 or 10, p.Color)
+		if explode then
+			VFX.Explosion(at, p.Color, explode / 10)
+		end
+	end
+end
+
+function VFX.Muzzle(pos: Vector3, dir: Vector3, color: Color3)
+	local p = fxPart({ Size = Vector3.new(0.6, 0.6, 1.4), CFrame = CFrame.lookAt(pos, pos + dir), Color = WHITE })
+	tween(p, 0.08, { Size = Vector3.new(0.1, 0.1, 2.2), Transparency = 1 })
+	Debris:AddItem(p, 0.1)
+	VFX.Emit(pos, "Sparks", 5, color)
+	VFX.Light(pos, color, 8, 3, 0.08)
+end
+
+-- A spinning energy orb that follows a part (Rasengan / charged shots).
+function VFX.ChargeOrb(follow: BasePart, offset: Vector3, color: Color3, maxSize: number, chargeTime: number)
+	local orb = fxPart({ Shape = Enum.PartType.Ball, Size = Vector3.one * 0.3, Color = color, Transparency = 0.25 })
+	local core = fxPart({ Shape = Enum.PartType.Ball, Size = Vector3.one * 0.15, Color = WHITE })
+	local rings = {}
+	for i = 1, 3 do
+		local r = fxPart({ Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.05, 0.4, 0.4), Color = color, Transparency = 0.3 })
+		rings[i] = r
+	end
+	local e = VFX.MakeEmitter("Vortex", color, orb, 6)
+	e.Size = NS(0, 1, 1, 2)
+	local sp = VFX.MakeEmitter("Sparks", color, orb, 30)
+	sp.Speed = NumberRange.new(2, 6)
+	local l = Instance.new("PointLight")
+	l.Color = color
+	l.Range = 12
+	l.Brightness = 3
+	l.Parent = orb
+	local start = os.clock()
+	local conn
+	conn = RunService.RenderStepped:Connect(function()
+		if not follow.Parent then
+			return
+		end
+		local t = os.clock() - start
+		local k = math.clamp(t / chargeTime, 0, 1)
+		local s = 0.4 + (maxSize - 0.4) * k
+		local cf = follow.CFrame * CFrame.new(offset)
+		orb.Size = Vector3.one * s
+		orb.CFrame = cf
+		core.Size = Vector3.one * s * 0.5
+		core.CFrame = cf
+		for i, r in ipairs(rings) do
+			r.Size = Vector3.new(0.05, s * 1.25, s * 1.25)
+			r.CFrame = cf * CFrame.Angles(t * (6 + i * 2), t * (4 + i), i)
+		end
+	end)
+	return {
+		Destroy = function()
+			conn:Disconnect()
+			orb:Destroy()
+			core:Destroy()
+			for _, r in ipairs(rings) do
+				r:Destroy()
+			end
+		end,
+		Position = function()
+			return orb.Position
+		end,
+	}
+end
+
+-- Swirling vortex zone (Dimensional Rift, Reap pulls).
+function VFX.Zone(pos: Vector3, radius: number, duration: number, color: Color3)
+	local flat = CFrame.new(pos) * CFrame.Angles(0, 0, math.rad(90))
+	local disc = fxPart({ Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.2, 0.5, 0.5), CFrame = flat, Color = color, Transparency = 0.35 })
+	local inner = fxPart({ Shape = Enum.PartType.Cylinder, Size = Vector3.new(0.25, 0.3, 0.3), CFrame = flat, Color = Color3.new(0, 0, 0), Transparency = 0.1, Material = Enum.Material.SmoothPlastic })
+	tween(disc, 0.3, { Size = Vector3.new(0.2, radius * 2, radius * 2) }, Enum.EasingStyle.Back)
+	tween(inner, 0.3, { Size = Vector3.new(0.25, radius * 1.2, radius * 1.2) }, Enum.EasingStyle.Back)
+	local a = Instance.new("Attachment")
+	a.WorldPosition = pos + Vector3.new(0, 1, 0)
+	a.Parent = workspace.Terrain
+	local v = VFX.MakeEmitter("Vortex", color, a, 8)
+	v.Size = NS(0, radius * 0.8, 1, radius * 1.6)
+	v.LockedToPart = false
+	local sp = VFX.MakeEmitter("Rise", color, a, 40)
+	sp.Shape = Enum.ParticleEmitterShape.Cylinder
+	sp.ShapeInOut = Enum.ParticleEmitterShapeInOut.Inward
+	local start = os.clock()
+	local conn
+	conn = RunService.RenderStepped:Connect(function()
+		local t = os.clock() - start
+		disc.CFrame = flat * CFrame.Angles(t * 4, 0, 0)
+		inner.CFrame = flat * CFrame.Angles(-t * 6, 0, 0)
+	end)
+	task.delay(duration, function()
+		conn:Disconnect()
+		v.Enabled = false
+		sp.Enabled = false
+		tween(disc, 0.3, { Size = Vector3.new(0.2, 0.1, 0.1), Transparency = 1 })
+		tween(inner, 0.3, { Size = Vector3.new(0.2, 0.1, 0.1), Transparency = 1 })
+		Debris:AddItem(disc, 0.35)
+		Debris:AddItem(inner, 0.35)
+		Debris:AddItem(a, 2)
+		VFX.Flash(pos, color, radius, 0.3)
+	end)
+end
+
+-- Neon afterimage of a character (dashes).
+function VFX.Afterimage(character: Model, color: Color3)
+	for _, d in ipairs(character:GetChildren()) do
+		if d:IsA("BasePart") and d.Transparency < 1 and d.Name ~= "HumanoidRootPart" then
+			local g = fxPart({ Size = d.Size, CFrame = d.CFrame, Color = color, Transparency = 0.45 })
+			tween(g, 0.35, { Transparency = 1 })
+			Debris:AddItem(g, 0.4)
+		end
+	end
+end
+
+-- Big frontal swipe used by cone skills.
+function VFX.ConeSwipe(origin: CFrame, range: number, color: Color3)
+	VFX.Slash(origin, color, range / 7, math.random() < 0.5)
+	VFX.Slash(origin * CFrame.Angles(0, 0, math.rad(20)), WHITE, range / 8, true)
+	local front = origin.Position + origin.LookVector * range * 0.6
+	VFX.Emit(front, "Sparks", 20, color)
+	VFX.Ring(front - Vector3.new(0, 2.5, 0), color, range * 0.6, 0.35)
+end
+
+function VFX.Nova(pos: Vector3, radius: number, color: Color3)
+	VFX.Ring(pos - Vector3.new(0, 2.5, 0), color, radius, 0.4)
+	VFX.ShardRing(pos - Vector3.new(0, 2, 0), color, radius, 18, 0.4)
+	VFX.Emit(pos, "Sparks", 24, color)
+	VFX.Flash(pos, color, radius * 0.5, 0.2)
+end
+
+-- Rectangular ground telegraph for lunges / line attacks.
+function VFX.TelegraphLine(pos: Vector3, dir: Vector3, length: number, width: number, t: number)
+	local flatDir = Vector3.new(dir.X, 0, dir.Z)
+	flatDir = flatDir.Magnitude > 0 and flatDir.Unit or Vector3.new(0, 0, -1)
+	local center = pos + flatDir * (length / 2)
+	local cf = CFrame.lookAt(center, center + flatDir)
+	local outline = fxPart({ Size = Vector3.new(width, 0.1, length), CFrame = cf, Color = Color3.fromRGB(255, 40, 40), Transparency = 0.6 })
+	local fill = fxPart({ Size = Vector3.new(width, 0.15, 0.2), CFrame = CFrame.lookAt(pos, pos + flatDir) * CFrame.new(0, 0, -0.1), Color = Color3.fromRGB(255, 90, 40), Transparency = 0.35 })
+	tween(fill, t, { Size = Vector3.new(width, 0.15, length), CFrame = cf }, Enum.EasingStyle.Linear)
+	task.delay(t, function()
+		outline:Destroy()
+		fill:Destroy()
+	end)
+end
+
+-- Straight energy streak between two points (dash strikes, lunges).
+function VFX.Streak(from: Vector3, to: Vector3, color: Color3, width: number?)
+	local d = (to - from).Magnitude
+	if d < 0.5 then
+		return
+	end
+	local w = width or 1.2
+	local p = fxPart({ Size = Vector3.new(w, w * 0.4, d), CFrame = CFrame.lookAt((from + to) / 2, to), Color = color, Transparency = 0.1 })
+	local core = fxPart({ Size = Vector3.new(w * 0.35, w * 0.2, d), CFrame = p.CFrame, Color = WHITE })
+	tween(p, 0.3, { Size = Vector3.new(0.05, 0.05, d), Transparency = 1 })
+	tween(core, 0.3, { Size = Vector3.new(0.02, 0.02, d), Transparency = 1 })
+	Debris:AddItem(p, 0.35)
+	Debris:AddItem(core, 0.35)
+end
+
 return VFX

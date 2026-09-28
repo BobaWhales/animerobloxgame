@@ -17,6 +17,7 @@ local Cosmetics = require(script.Parent:WaitForChild("Cosmetics"))
 local Monetization = require(script.Parent:WaitForChild("Monetization"))
 local TowerService = require(script.Parent:WaitForChild("TowerService"))
 local Util = require(script.Parent:WaitForChild("Util"))
+local Weapons = require(script.Parent:WaitForChild("Weapons"))
 
 local Actions = {}
 local map = nil
@@ -275,6 +276,83 @@ handlers.Ready = function(player)
 end
 
 ---------------------------------------------------------------------
+-- WEAPONS / CHESTS / POWER
+---------------------------------------------------------------------
+handlers.Equip = function(player, uid)
+	Weapons.Equip(player, uid)
+	Cosmetics.Apply(player)
+end
+
+handlers.Scrap = function(player, uid)
+	Weapons.Scrap(player, uid)
+end
+
+function Actions.ChestCost(data, chest): number
+	return math.floor((chest.CoinCost or 0) * (1 + data.Rebirths))
+end
+
+handlers.OpenChest = function(player, chestId)
+	local data = DataService.Get(player)
+	local chest = type(chestId) == "string" and Config.ChestById[chestId]
+	if not chest then
+		return
+	end
+	if chest.Key then
+		if (data.Keys[chest.Key] or 0) <= 0 then
+			Net.Notify(player, "You need a " .. Config.KeyNames[chest.Key] .. ". Earn them from play-time rewards!", RED, "Error")
+			return
+		end
+		data.Keys[chest.Key] -= 1
+	else
+		local cost = Actions.ChestCost(data, chest)
+		if data.Coins < cost then
+			Net.Notify(player, "Not enough Coins (" .. Format.Abbrev(cost) .. " needed).", RED, "Error")
+			return
+		end
+		data.Coins -= cost
+	end
+	local weaponId, rarityId = Weapons.Roll(chest.MinRarity, 1)
+	local uid = Weapons.Add(player, weaponId, rarityId)
+	Net.FX(player, "ChestResult", { Chest = chest.Id, Weapon = weaponId, Rarity = rarityId, Uid = uid })
+	DataService.MarkDirty(player)
+end
+
+handlers.BuyPower = function(player)
+	Monetization.PromptPowerTier(player)
+end
+
+---------------------------------------------------------------------
+-- CUSTOM PROXIMITY PROMPTS (client fires Interact after Triggered)
+---------------------------------------------------------------------
+local PANEL_FOR = { Upgrades = "Upgrades", Race = "Race", Rebirth = "Rebirth", Index = "Index", Chests = "Chests" }
+
+handlers.Interact = function(player, prompt)
+	if typeof(prompt) ~= "Instance" or not prompt:IsA("ProximityPrompt") or not prompt.Enabled then
+		return
+	end
+	if not prompt:IsDescendantOf(map.Root) then
+		return
+	end
+	local parent = prompt.Parent
+	local pos = parent and (parent:IsA("BasePart") and parent.Position or (parent:IsA("Attachment") and parent.WorldPosition))
+	local char = player.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not pos or not root or (root.Position - pos).Magnitude > prompt.MaxActivationDistance + 6 then
+		return
+	end
+	local action = prompt:GetAttribute("Action")
+	if action == "Forge" then
+		handlers.Forge(player, nil)
+	elseif action == "Sell" then
+		Net.FX(player, "OpenPanel", { Name = "Backpack", Mode = "Sell" })
+	elseif action == "Tower" then
+		TowerService.Start(player)
+	elseif PANEL_FOR[action] then
+		Net.FX(player, "OpenPanel", { Name = PANEL_FOR[action] })
+	end
+end
+
+---------------------------------------------------------------------
 local lastRequests: { [Player]: { number } } = {}
 
 function Actions.Handle(player: Player, action, arg)
@@ -312,6 +390,9 @@ end
 function Actions.Init(m)
 	map = m
 	Net.Request.OnServerEvent:Connect(Actions.Handle)
+	Net.Interact.OnServerEvent:Connect(function(player, prompt)
+		Actions.Handle(player, "Interact", prompt)
+	end)
 end
 
 return Actions

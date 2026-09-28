@@ -136,6 +136,7 @@ local function onWin(player: Player, run)
 		local a = math.random() * math.pi * 2
 		Loot.Drop(player, oreId, run.Center + Vector3.new(math.cos(a) * 6, 1.2, math.sin(a) * 6))
 	end
+	EnemyService.WeaponDrop(player, Config.WeaponDropChance.Tower)
 	DataService.MarkDirty(player)
 	Net.FX(player, "Tower", { State = "Win", Floor = floor, Coins = coins, Runes = Config.Tower.RunesPerFloor, Text = "+" .. Format.Abbrev(coins) .. " Coins  +" .. Config.Tower.RunesPerFloor .. " Rune" })
 	run.Paused = true
@@ -158,11 +159,10 @@ startFloor = function(player: Player, run)
 			return
 		end
 		run.Guardian = EnemyService.Create({
-			Name = "Guardian",
 			Label = "FLOOR " .. floor .. " GUARDIAN",
-			Style = (floor % 2 == 0) and "Mech" or "Creature",
+			LookIndex = ((floor - 1) % #Config.EnemyLooks) + 1,
 			Color = color,
-			Scale = 2.2,
+			Scale = 2,
 			HP = hp,
 			Boss = true,
 			Owner = player,

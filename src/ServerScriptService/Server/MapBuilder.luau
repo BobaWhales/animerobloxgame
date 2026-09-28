@@ -9,6 +9,7 @@
 -- There is NO VIP room and NO PvP arena.
 
 local Lighting = game:GetService("Lighting")
+local MaterialService = game:GetService("MaterialService")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -23,6 +24,7 @@ local WHITE = Color3.new(1, 1, 1)
 local FLAT = CFrame.Angles(0, 0, math.rad(90)) -- cylinder axis X -> Y (flat disc)
 
 local root: Folder
+local buildChestShrine, buildAmbient
 
 local function P(parent: Instance, props): Part
 	local p = Instance.new(props.ClassName or "Part")
@@ -103,15 +105,21 @@ local function billboard(adornee: Instance, title: string, sub: string?, color: 
 	return bb
 end
 
-local function prompt(parent: Instance, action: string, object: string, name: string): ProximityPrompt
+-- Custom-styled prompt (drawn by Client/PromptUI). "key" is the server
+-- action run when the client reports the prompt was triggered.
+local function prompt(parent: Instance, action: string, object: string, name: string, key: string): ProximityPrompt
 	local pp = Instance.new("ProximityPrompt")
 	pp.Name = name
 	pp.ActionText = action
 	pp.ObjectText = object
 	pp.HoldDuration = 0
-	pp.MaxActivationDistance = 16
-	pp.RequiresLineOfSight = false
-	pp.KeyboardKeyCode = Enum.KeyCode.E
+	pp.MaxActivationDistance = Config.Prompt.MaxActivationDistance
+	pp.RequiresLineOfSight = Config.Prompt.RequiresLineOfSight
+	pp.Style = Enum.ProximityPromptStyle.Custom
+	-- F / D-pad up, because E / X are the weapon-skill binds
+	pp.KeyboardKeyCode = Enum.KeyCode.F
+	pp.GamepadKeyCode = Enum.KeyCode.DPadUp
+	pp:SetAttribute("Action", key)
 	pp.Parent = parent
 	return pp
 end
@@ -124,12 +132,12 @@ local function emitter(parent: Instance, preset: string, color: Color3, rate: nu
 	return e, a
 end
 
-local function light(parent: Instance, color: Color3, range: number, brightness: number)
+local function light(parent: Instance, color: Color3, range: number, brightness: number, shadows: boolean?)
 	local l = Instance.new("PointLight")
 	l.Color = color
 	l.Range = range
 	l.Brightness = brightness
-	l.Shadows = false
+	l.Shadows = shadows == true
 	l.Parent = parent
 	return l
 end
@@ -160,14 +168,21 @@ end
 -- LIGHTING (bright anime look: bloom, saturation, sun rays)
 ---------------------------------------------------------------------
 local function buildLighting()
+	local G = Config.Graphics
+	-- Technology can't be set from scripts (Roblox security); the place file
+	-- ships with Future. This pcall just makes the intent explicit.
+	pcall(function()
+		(Lighting :: any).Technology = Enum.Technology.Future
+	end)
 	Lighting.ClockTime = 15.3
-	Lighting.Brightness = 2.6
-	Lighting.Ambient = Color3.fromRGB(95, 90, 115)
-	Lighting.OutdoorAmbient = Color3.fromRGB(150, 140, 170)
-	Lighting.EnvironmentDiffuseScale = 0.6
-	Lighting.EnvironmentSpecularScale = 0.8
+	Lighting.Brightness = 3
+	Lighting.Ambient = Color3.fromRGB(80, 75, 100)
+	Lighting.OutdoorAmbient = Color3.fromRGB(140, 130, 165)
+	Lighting.EnvironmentDiffuseScale = 1
+	Lighting.EnvironmentSpecularScale = 1
 	Lighting.GlobalShadows = true
-	Lighting.ExposureCompensation = 0.1
+	Lighting.ShadowSoftness = 0.25
+	Lighting.ExposureCompensation = 0.05
 	Lighting.GeographicLatitude = 30
 
 	for _, c in ipairs(Lighting:GetChildren()) do
@@ -176,32 +191,68 @@ local function buildLighting()
 		end
 	end
 	local atm = Instance.new("Atmosphere")
-	atm.Density = 0.28
-	atm.Offset = 0.2
-	atm.Color = Color3.fromRGB(215, 200, 255)
-	atm.Decay = Color3.fromRGB(120, 110, 170)
-	atm.Glare = 0.4
-	atm.Haze = 1.2
+	atm.Density = G.Atmosphere.Density
+	atm.Offset = G.Atmosphere.Offset
+	atm.Color = G.Atmosphere.Color
+	atm.Decay = G.Atmosphere.Decay
+	atm.Glare = G.Atmosphere.Glare
+	atm.Haze = G.Atmosphere.Haze
 	atm.Parent = Lighting
 
 	local bloom = Instance.new("BloomEffect")
-	bloom.Intensity = 0.7
-	bloom.Size = 28
-	bloom.Threshold = 1.4
+	bloom.Threshold = G.Bloom.Threshold
+	bloom.Size = G.Bloom.Size
+	bloom.Intensity = G.Bloom.Intensity
 	bloom.Parent = Lighting
 
 	local cc = Instance.new("ColorCorrectionEffect")
 	cc.Name = "GameColor"
-	cc.Saturation = 0.22
-	cc.Contrast = 0.08
-	cc.Brightness = 0.02
+	cc.Contrast = G.ColorCorrection.Contrast
+	cc.Saturation = G.ColorCorrection.Saturation
+	cc.Brightness = G.ColorCorrection.Brightness
 	cc.TintColor = Color3.fromRGB(255, 250, 255)
 	cc.Parent = Lighting
 
 	local rays = Instance.new("SunRaysEffect")
-	rays.Intensity = 0.06
-	rays.Spread = 0.6
+	rays.Intensity = G.SunRays.Intensity
+	rays.Spread = G.SunRays.Spread
 	rays.Parent = Lighting
+end
+
+-- Optional PBR MaterialVariants from Config.Graphics.MaterialVariants.
+local function applyMaterialVariants(folderRoot: Instance)
+	local variants = {}
+	for matName, maps in pairs(Config.Graphics.MaterialVariants) do
+		local base = (Enum.Material :: any)[matName]
+		if base and maps.ColorMap and maps.ColorMap ~= "rbxassetid://0" then
+			local name = "Anime_" .. matName
+			local mv = MaterialService:FindFirstChild(name) or Instance.new("MaterialVariant")
+			mv.Name = name
+			mv.BaseMaterial = base
+			mv.ColorMap = maps.ColorMap
+			mv.NormalMap = maps.NormalMap or ""
+			mv.RoughnessMap = maps.RoughnessMap or ""
+			mv.MetalnessMap = maps.MetalnessMap or ""
+			mv.Parent = MaterialService
+			variants[base] = name
+		end
+	end
+	if next(variants) == nil then
+		return
+	end
+	for _, d in ipairs(folderRoot:GetDescendants()) do
+		if d:IsA("BasePart") and variants[d.Material] then
+			d.MaterialVariant = variants[d.Material]
+		end
+	end
+end
+
+-- Big invisible volumes that emit ambient particles.
+local function ambientVolume(parent: Instance, cf: CFrame, size: Vector3, preset: string, color: Color3, rate: number)
+	local vol = P(parent, { Name = "AmbientFX", Size = size, CFrame = cf, Transparency = 1, CanCollide = false, CanQuery = false, CanTouch = false, CastShadow = false })
+	local e = VFX.MakeEmitter(preset, color, vol, rate)
+	e.Shape = Enum.ParticleEmitterShape.Box
+	return e
 end
 
 ---------------------------------------------------------------------
@@ -232,7 +283,7 @@ local function lantern(parent, pos: Vector3, color: Color3?)
 	P(parent, { Name = "LanternPost", Size = Vector3.new(0.6, 8, 0.6), CFrame = CFrame.new(pos + Vector3.new(0, 4, 0)), Color = Color3.fromRGB(60, 40, 40), Material = Enum.Material.Wood })
 	P(parent, { Name = "LanternArm", Size = Vector3.new(0.4, 0.4, 2.2), CFrame = CFrame.new(pos + Vector3.new(0, 7.8, 0.9)), Color = Color3.fromRGB(60, 40, 40), Material = Enum.Material.Wood })
 	local lamp = P(parent, { Name = "Lantern", Shape = Enum.PartType.Ball, Size = Vector3.new(1.8, 1.8, 1.8), CFrame = CFrame.new(pos + Vector3.new(0, 6.8, 1.8)), Color = color, Material = Enum.Material.Neon, CanCollide = false })
-	light(lamp, color :: Color3, 18, 1.4)
+	light(lamp, color :: Color3, 18, 1.4, true)
 	return lamp
 end
 
@@ -319,7 +370,7 @@ local function buildHub(map)
 	P(forgeModel, { Name = "Belly", Shape = Enum.PartType.Ball, Size = Vector3.new(14, 9, 14), CFrame = CFrame.new(fpos + Vector3.new(0, 5.5, 0)), Color = Color3.fromRGB(40, 35, 45), Material = Enum.Material.Metal })
 	disc(forgeModel, fpos + Vector3.new(0, 9.6, 0), 14.4, 0.9, Color3.fromRGB(60, 55, 65), Enum.Material.Metal, "Rim")
 	local lava = disc(forgeModel, fpos + Vector3.new(0, 9.7, 0), 12, 0.6, Color3.fromRGB(255, 120, 30), Enum.Material.Neon, "Lava")
-	light(lava, Color3.fromRGB(255, 140, 50), 34, 3)
+	light(lava, Color3.fromRGB(255, 140, 50), 34, 3, true)
 	emitter(lava, "Embers", Color3.fromRGB(255, 150, 60), 14, Vector3.new(0, 0.5, 0))
 	emitter(lava, "Fire", Color3.fromRGB(255, 120, 30), 10, Vector3.new(0, 0.5, 0))
 	local _, fireAtt = emitter(forgeModel.PrimaryPart or pot, "Fire", Color3.fromRGB(255, 90, 20), 22)
@@ -332,9 +383,8 @@ local function buildHub(map)
 	-- anvil
 	P(forgeModel, { Name = "AnvilBase", Size = Vector3.new(2, 2.4, 2), CFrame = CFrame.new(fpos + Vector3.new(10, 2.4, 5)), Color = Color3.fromRGB(50, 50, 60), Material = Enum.Material.Metal })
 	P(forgeModel, { Name = "AnvilTop", Size = Vector3.new(4.5, 1.2, 2.2), CFrame = CFrame.new(fpos + Vector3.new(10, 4.2, 5)), Color = Color3.fromRGB(70, 70, 85), Material = Enum.Material.Metal })
-	billboard(lava, "FORGE", "Smelt ore -> +1 Blade", Color3.fromRGB(255, 160, 60), 9)
-	local forgePrompt = prompt(lava, "Forge Ore", "Forge Cauldron", "ForgePrompt")
-	forgePrompt.MaxActivationDistance = 20
+	billboard(lava, "FORGE", "Smelt ore -> +1 Forge level", Color3.fromRGB(255, 160, 60), 9)
+	local forgePrompt = prompt(lava, "Forge Ore", "Forge Cauldron", "ForgePrompt", "Forge")
 	forgeModel.Parent = hub
 	map.Forge = lava
 	map.ForgePrompt = forgePrompt
@@ -342,10 +392,10 @@ local function buildHub(map)
 	---------------- SELL + UPGRADES ----------------
 	local _, sellCounter = stall(hub, CFrame.new(-40, 0, -20) * CFrame.Angles(0, math.rad(35), 0), Color3.fromRGB(255, 200, 60), "SELL", "Ore -> Coins")
 	map.Sell = sellCounter
-	map.SellPrompt = prompt(sellCounter, "Sell Ore", "Merchant", "SellPrompt")
+	map.SellPrompt = prompt(sellCounter, "Sell Ore", "Merchant", "SellPrompt", "Sell")
 	local _, upCounter = stall(hub, CFrame.new(40, 0, -20) * CFrame.Angles(0, math.rad(-35), 0), Color3.fromRGB(80, 170, 255), "UPGRADES", "Backpack / Luck / Training")
 	map.Upgrades = upCounter
-	map.UpgradePrompt = prompt(upCounter, "Open Upgrades", "Trainer", "UpgradePrompt")
+	map.UpgradePrompt = prompt(upCounter, "Open Upgrades", "Trainer", "UpgradePrompt", "Upgrades")
 
 	---------------- RACE ALTAR ----------------
 	local altar = Instance.new("Model")
@@ -355,7 +405,7 @@ local function buildHub(map)
 	disc(altar, apos + Vector3.new(0, 1.25, 0), 16, 0.2, Color3.fromRGB(140, 110, 255), Enum.Material.Neon, "AltarGlow").Transparency = 0.3
 	local orb = P(altar, { Name = "Orb", Shape = Enum.PartType.Ball, Size = Vector3.one * 4, CFrame = CFrame.new(apos + Vector3.new(0, 7, 0)), Color = Color3.fromRGB(200, 170, 255), Material = Enum.Material.Neon, CanCollide = false })
 	spin(orb, 0, 0.8)
-	light(orb, Color3.fromRGB(170, 130, 255), 26, 2.5)
+	light(orb, Color3.fromRGB(170, 130, 255), 26, 2.5, true)
 	emitter(orb, "Vortex", Color3.fromRGB(170, 120, 255), 3)
 	emitter(orb, "Stars", Color3.fromRGB(200, 170, 255), 4)
 	P(altar, { Name = "Pedestal", Size = Vector3.new(3, 4, 3), CFrame = CFrame.new(apos + Vector3.new(0, 3, 0)), Color = Color3.fromRGB(80, 70, 110), Material = Enum.Material.Marble })
@@ -365,8 +415,8 @@ local function buildHub(map)
 		spin(crystal, 60, 0.6)
 	end
 	billboard(orb, "RACE ALTAR", "Roll your bloodline", Color3.fromRGB(190, 150, 255), 5)
-	map.RacePrompt = prompt(orb, "Roll Race", "Race Altar", "RacePrompt")
-	map.RacePrompt.MaxActivationDistance = 18
+	map.RacePrompt = prompt(orb, "Roll Race", "Race Altar", "RacePrompt", "Race")
+	map.RacePrompt.MaxActivationDistance = 12
 	altar.Parent = hub
 
 	---------------- REBIRTH STATUE (giant sword in stone) ----------------
@@ -380,12 +430,11 @@ local function buildHub(map)
 	P(statue, { Name = "Guard", Size = Vector3.new(2, 1.6, 10), CFrame = blade.CFrame * CFrame.new(0, 10.6, 0), Color = Color3.fromRGB(255, 200, 70), Material = Enum.Material.Metal })
 	P(statue, { Name = "Hilt", Size = Vector3.new(1.4, 6, 1.4), CFrame = blade.CFrame * CFrame.new(0, 14.2, 0), Color = Color3.fromRGB(80, 30, 40), Material = Enum.Material.Fabric })
 	local pommel = P(statue, { Name = "Pommel", Shape = Enum.PartType.Ball, Size = Vector3.one * 2.4, CFrame = blade.CFrame * CFrame.new(0, 17.6, 0), Color = Color3.fromRGB(255, 220, 90), Material = Enum.Material.Neon })
-	light(pommel, Color3.fromRGB(255, 210, 90), 30, 2)
+	light(pommel, Color3.fromRGB(255, 210, 90), 30, 2, true)
 	emitter(blade, "Rise", Color3.fromRGB(255, 220, 110), 5)
 	billboard(pommel, "REBIRTH", "Reset Power for permanent boosts", Color3.fromRGB(255, 215, 90), 4)
 	local holder = P(statue, { Name = "PromptHolder", Size = Vector3.one, Transparency = 1, CanCollide = false, CFrame = CFrame.new(spos + Vector3.new(0, 4, 0)) })
-	map.RebirthPrompt = prompt(holder, "Rebirth", "Sword of Ascension", "RebirthPrompt")
-	map.RebirthPrompt.MaxActivationDistance = 18
+	map.RebirthPrompt = prompt(holder, "Rebirth", "Sword of Ascension", "RebirthPrompt", "Rebirth")
 	statue.Parent = hub
 
 	---------------- INDEX + LEADERBOARD ----------------
@@ -438,7 +487,7 @@ local function buildHub(map)
 		table.insert(lines, string.format('<font color="#%s">%s</font>  (%s)', ore.Color:ToHex(), ore.Name, Config.Rarity[ore.Rarity].Label))
 	end
 	indexBody.Text = table.concat(lines, "\n")
-	map.IndexPrompt = prompt(indexBoard, "Open Index", "Ore Index", "IndexPrompt")
+	map.IndexPrompt = prompt(indexBoard, "Open Index", "Ore Index", "IndexPrompt", "Index")
 	local _, lbBody = board(Vector3.new(20, 0, 52), "TOP BLADES", Color3.fromRGB(255, 210, 80))
 	lbBody.Text = "Loading..."
 	map.LeaderboardText = lbBody
@@ -553,7 +602,7 @@ local function buildPortals(map)
 		if not zone.ComingSoon then
 			emitter(surface, "Vortex", accent, 3).Size = VFX.NS(0, 8, 1, 14)
 			emitter(surface, "Sparks", accent, 8).Speed = NumberRange.new(4, 10)
-			light(surface, accent, 26, 2.5)
+			light(surface, accent, 26, 2.5, true)
 			loopSound(surface, "rbxasset://sounds/action_swim.mp3", 0.25, 0.22)
 		end
 		local sub
@@ -584,12 +633,12 @@ local function buildTower(map)
 	P(tower, { Name = "TowerCap", Shape = Enum.PartType.Ball, Size = Vector3.new(30, 16, 30), CFrame = CFrame.new(c + Vector3.new(0, 122, 0)), Color = Color3.fromRGB(60, 40, 100), Material = Enum.Material.Slate })
 	local crystal = P(tower, { Name = "TowerCrystal", Size = Vector3.new(6, 12, 6), CFrame = CFrame.new(c + Vector3.new(0, 140, 0)) * CFrame.Angles(0, 0, math.rad(45)), Color = Color3.fromRGB(220, 150, 255), Material = Enum.Material.Neon, CanCollide = false })
 	spin(crystal, 40, 2)
-	light(crystal, Color3.fromRGB(210, 140, 255), 60, 3)
+	light(crystal, Color3.fromRGB(210, 140, 255), 60, 3, true)
 	emitter(crystal, "Stars", Color3.fromRGB(220, 160, 255), 5)
 	local door = P(tower, { Name = "TowerDoor", Size = Vector3.new(1, 14, 9), CFrame = CFrame.new(c + Vector3.new(-13.2, 9, 0)), Color = Color3.fromRGB(200, 120, 255), Material = Enum.Material.Neon, Transparency = 0.2 })
 	emitter(door, "Vortex", Color3.fromRGB(180, 110, 255), 2)
 	billboard(door, "INFINITE TOWER", "Beat the Guardian before time runs out", Color3.fromRGB(220, 160, 255), 12, 1.1)
-	local pp = prompt(door, "Enter Tower", "Infinite Tower", "TowerPrompt")
+	local pp = prompt(door, "Enter Tower", "Infinite Tower", "TowerPrompt", "Tower")
 	pp.HoldDuration = 0.4
 	map.TowerPrompt = pp
 	map.TowerCFrame = CFrame.new(c + Vector3.new(-22, 4, 0)) * CFrame.Angles(0, math.rad(90), 0)
@@ -646,7 +695,7 @@ local function decorateRoom(parent, zone, center: Vector3, rng: Random)
 			P(parent, { Name = "FloorStrip", Size = Vector3.new(0.6, 0.2, ROOM_LEN - 4), CFrame = CFrame.new(center + Vector3.new(side * (ROOM_W / 2 - 4), 0.1, 0)), Color = side < 0 and zone.Accent or Color3.fromRGB(255, 60, 200), Material = Enum.Material.Neon, CanCollide = false })
 		end
 		local beam = P(parent, { Name = "CraneBeam", Size = Vector3.new(ROOM_W, 2, 2), CFrame = CFrame.new(center + Vector3.new(0, WALL_H + 2, rng:NextNumber(-20, 20))), Color = Color3.fromRGB(230, 170, 50), Material = Enum.Material.DiamondPlate })
-		light(beam, zone.Accent, 30, 1.5)
+		light(beam, zone.Accent, 30, 1.5, true)
 	end
 end
 
@@ -743,6 +792,67 @@ local function buildDungeon(map, zone)
 end
 
 ---------------------------------------------------------------------
+-- WEAPON CHEST SHRINE (hub)
+---------------------------------------------------------------------
+buildChestShrine = function(map)
+	local shrine = Instance.new("Model")
+	shrine.Name = "ChestShrine"
+	local c = Vector3.new(0, 0, 58)
+	local gold = Color3.fromRGB(255, 200, 70)
+	disc(shrine, c + Vector3.new(0, 0.6, 0), 16, 1.2, Color3.fromRGB(60, 45, 70), Enum.Material.Marble, "ShrineBase")
+	disc(shrine, c + Vector3.new(0, 1.25, 0), 13, 0.15, gold, Enum.Material.Neon, "ShrineGlow").Transparency = 0.4
+	local base = P(shrine, { Name = "ChestBase", Size = Vector3.new(7, 3.2, 4.5), CFrame = CFrame.new(c + Vector3.new(0, 2.9, 0)), Color = Color3.fromRGB(120, 60, 40), Material = Enum.Material.WoodPlanks })
+	P(shrine, { Name = "ChestLid", Shape = Enum.PartType.Cylinder, Size = Vector3.new(7, 4.5, 4.5), CFrame = CFrame.new(c + Vector3.new(0, 4.5, 0)), Color = Color3.fromRGB(135, 70, 45), Material = Enum.Material.WoodPlanks })
+	for _, x in ipairs({ -3.2, 0, 3.2 }) do
+		P(shrine, { Name = "Band", Size = Vector3.new(0.4, 3.3, 4.6), CFrame = CFrame.new(c + Vector3.new(x, 2.9, 0)), Color = gold, Material = Enum.Material.Metal })
+	end
+	local lock = P(shrine, { Name = "Lock", Size = Vector3.new(1, 1.2, 0.4), CFrame = CFrame.new(c + Vector3.new(0, 3.6, -2.35)), Color = gold, Material = Enum.Material.Neon })
+	local crack = P(shrine, { Name = "Crack", Size = Vector3.new(6.6, 0.15, 4.4), CFrame = CFrame.new(c + Vector3.new(0, 4.5, 0)), Color = gold, Material = Enum.Material.Neon })
+	light(crack, gold, 22, 2.5, true)
+	emitter(crack, "Stars", gold, 6, Vector3.new(0, 1, 0))
+	for i, r in ipairs(Config.WeaponRarities) do
+		local a = (i / #Config.WeaponRarities) * math.pi * 2
+		local gem = P(shrine, { Name = "Gem_" .. r.Id, Size = Vector3.new(0.9, 1.6, 0.9), CFrame = CFrame.new(c + Vector3.new(math.cos(a) * 6, 8, math.sin(a) * 6)) * CFrame.Angles(0, a, math.rad(45)), Color = r.Color, Material = Enum.Material.Neon, CanCollide = false })
+		spin(gem, 70, 0.5)
+	end
+	billboard(lock, "WEAPON CHESTS", "Keys, scrolls and gacha spins", gold, 7, 1)
+	map.ChestPrompt = prompt(base, "Open Chests", "Weapon Shrine", "ChestPrompt", "Chests")
+	shrine.Parent = root:FindFirstChild("Hub") or root
+end
+
+---------------------------------------------------------------------
+-- AMBIENT PARTICLES (energy motes, cherry blossoms, dark aura trails)
+---------------------------------------------------------------------
+buildAmbient = function(map)
+	local amb = folder("Ambient", root)
+	local motes = ambientVolume(amb, CFrame.new(0, 10, -10), Vector3.new(180, 16, 180), "Rise", Color3.fromRGB(180, 220, 255), 14)
+	motes.Speed = NumberRange.new(0.5, 1.5)
+	motes.Lifetime = NumberRange.new(3, 5)
+	motes.Size = VFX.NS(0, 0, 0.2, 0.25, 0.8, 0.25, 1, 0)
+	local petals = ambientVolume(amb, CFrame.new(0, 45, 0), Vector3.new(220, 4, 220), "Petals", Color3.fromRGB(255, 170, 210), 20)
+	petals.Lifetime = NumberRange.new(8, 12)
+	petals.Acceleration = Vector3.new(1.5, -3, 0.8)
+	petals.Size = VFX.NS(0, 0.35, 1, 0.25)
+	for zoneId, dungeon in pairs(map.Dungeons) do
+		local o = dungeon.Origin
+		local len = 60 + 100 * Config.StagesPerZone
+		local cf = CFrame.new(o.X, 3, o.Z + 30 - len / 2)
+		if zoneId == 2 then
+			local dark = ambientVolume(amb, cf, Vector3.new(76, 2, len), "Aura", Color3.fromRGB(110, 40, 180), 30)
+			dark.Transparency = VFX.NS(0, 0.7, 0.5, 0.8, 1, 1)
+			dark.Speed = NumberRange.new(1, 3)
+			dark.Lifetime = NumberRange.new(1.5, 2.5)
+			dark.LockedToPart = false
+		else
+			local flies = ambientVolume(amb, cf + Vector3.new(0, 5, 0), Vector3.new(76, 10, len), "Stars", Color3.fromRGB(170, 255, 140), 18)
+			flies.Speed = NumberRange.new(0.2, 1)
+			flies.Lifetime = NumberRange.new(2, 4)
+			flies.Size = VFX.NS(0, 0, 0.5, 0.35, 1, 0)
+		end
+	end
+end
+
+---------------------------------------------------------------------
 function MapBuilder.Build()
 	local old = workspace:FindFirstChild("GeneratedMap")
 	if old then
@@ -758,11 +868,14 @@ function MapBuilder.Build()
 	buildTrain(map)
 	buildPortals(map)
 	buildTower(map)
+	buildChestShrine(map)
 	for _, zone in ipairs(Config.Zones) do
 		if not zone.ComingSoon then
 			buildDungeon(map, zone)
 		end
 	end
+	buildAmbient(map)
+	applyMaterialVariants(root)
 
 	local arenas = folder("TowerArenas", workspace)
 	map.TowerArenas = arenas

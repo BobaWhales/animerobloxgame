@@ -44,9 +44,50 @@ function Stats.ZenkaiActive(player: Player): boolean
 end
 
 ---------------------------------------------------------------------
+-- WEAPON
+---------------------------------------------------------------------
+-- Returns weaponDef, rarityDef, record (or starter defaults).
+function Stats.Weapon(player: Player)
+	local data = DataService.Get(player)
+	local rec = data and data.Weapons[data.Equipped]
+	local def = rec and Config.WeaponById[rec.W] or Config.WeaponById[Config.StarterWeapon]
+	local rarity = rec and Config.WeaponRarityById[rec.R] or Config.WeaponRarities[1]
+	return def, rarity, rec
+end
+
+function Stats.HasPassive(player: Player, passiveId: string): boolean
+	local def, rarity = Stats.Weapon(player)
+	return rarity.Passive == true and def.Passive ~= nil and def.Passive.Id == passiveId
+end
+
+function Stats.AttackSpeed(player: Player): number
+	local _, rarity = Stats.Weapon(player)
+	local bonus = rarity.AttackSpeed or 0
+	if Stats.HasPassive(player, "Released") then
+		bonus += 0.15
+	end
+	if Stats.OverdriveActive(player) then
+		bonus += 0.1
+	end
+	return math.min(bonus, Config.Balance.AttackSpeedCap)
+end
+
+function Stats.BoostActive(player: Player): boolean
+	local data = DataService.Get(player)
+	return data ~= nil and data.BoostEnds > now()
+end
+
+function Stats.PowerTierMult(player: Player): number
+	local data = DataService.Get(player)
+	return Config.PowerTierMult(data and data.PowerTier or 0)
+end
+
+---------------------------------------------------------------------
 -- DAMAGE
 ---------------------------------------------------------------------
-function Stats.DamageMult(player: Player): number
+-- Gameplay multipliers (race, skin, rebirth, runes, buffs) are multiplied
+-- together and HARD CAPPED at Config.Balance.DamageMultCap.
+function Stats.GameplayMult(player: Player): number
 	local data = DataService.Get(player)
 	if not data then
 		return 1
@@ -58,27 +99,34 @@ function Stats.DamageMult(player: Player): number
 	if Stats.OverdriveActive(player) then
 		mult *= Config.Overdrive.Damage
 	end
+	if Stats.BoostActive(player) then
+		mult *= 2
+	end
 	if race.Zenkai then
 		local char = player.Character
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
 		if hum and hum.MaxHealth > 0 then
 			local missing = 1 - math.clamp(hum.Health / hum.MaxHealth, 0, 1)
-			mult *= 1 + missing -- up to 2x at 0 HP
+			mult *= 1 + missing
 		end
 		if Stats.ZenkaiActive(player) then
 			mult *= 2
 		end
 	end
-	return mult
+	return math.min(mult, Config.Balance.DamageMultCap)
 end
 
+-- Base hit damage for the equipped weapon (skill coefficients multiply this).
 function Stats.Damage(player: Player): number
 	local data = DataService.Get(player)
 	if not data then
 		return 0
 	end
+	local def, rarity = Stats.Weapon(player)
+	local class = Config.WeaponClasses[def.Class]
 	local base = (Config.BaseDamage + data.Blade) * (1 + data.Power / Config.PowerDamageDivisor)
-	return base * Stats.DamageMult(player)
+	base *= (class and class.Base or 1) * (1 + rarity.Damage)
+	return base * Stats.GameplayMult(player) * Stats.PowerTierMult(player)
 end
 
 function Stats.CritChance(player: Player): number
@@ -87,7 +135,27 @@ function Stats.CritChance(player: Player): number
 		return 0
 	end
 	local race = Stats.Race(data)
-	return math.min(0.75, (Config.BaseCritChance + (race.Crit or 0)) * allStats(data))
+	return math.min(0.5, (Config.BaseCritChance + (race.Crit or 0)) * allStats(data))
+end
+
+function Stats.CritMult(): number
+	return math.min(Config.CritMultiplier, Config.Balance.CritMultCap)
+end
+
+function Stats.StaminaCost(player: Player, base: number): number
+	local cost = base * Config.Balance.StaminaCostMult
+	if Stats.HasPassive(player, "ChakraFlow") then
+		cost *= 0.8
+	end
+	return cost
+end
+
+function Stats.Cooldown(player: Player, skillId: string, base: number): number
+	local cd = base * Config.Balance.CooldownMult
+	if skillId == "GetsugaTensho" and Stats.HasPassive(player, "Released") then
+		cd *= 0.8
+	end
+	return cd
 end
 
 ---------------------------------------------------------------------
@@ -131,6 +199,7 @@ function Stats.CoinMult(player: Player): number
 	if Stats.HasPass(player, "DoubleCoins") then
 		mult *= 2
 	end
+	mult *= 1 + math.min(data.Streak * Config.Daily.CoinBonusPerDay, Config.Daily.MaxCoinBonus)
 	-- Pirate crew aura: +10% if another Pirate is nearby
 	local char = player.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -309,7 +378,20 @@ function Stats.Snapshot(player: Player)
 		Settings = data.Settings,
 		RebirthReq = Stats.RebirthReq(data),
 		Tower = tower and { Floor = tower.Floor, EndsAt = tower.EndsAt, Active = tower.Active } or nil,
+		Weapons = data.Weapons,
+		Equipped = data.Equipped,
+		Keys = data.Keys,
+		Potions = data.Potions,
+		BoostEnds = data.BoostEnds,
+		PowerTier = data.PowerTier,
+		Streak = data.Streak,
+		TotalPlaytime = data.TotalPlaytime,
+		Cosmetics = data.Cosmetics,
+		PlaytimeClaimed = s.PlaytimeClaimed,
 		Derived = {
+			PowerMult = Stats.PowerTierMult(player),
+			GameplayMult = Stats.GameplayMult(player),
+			AttackSpeed = Stats.AttackSpeed(player),
 			Damage = Stats.Damage(player),
 			PowerPerSwing = Config.ClickPower * Stats.PowerMult(player),
 			Luck = Stats.Luck(player),

@@ -28,6 +28,17 @@
       "$properties": {
         "CharacterAutoLoads": true
       }
+    },
+    "Lighting": {
+      "$properties": {
+        "Technology": "Future",
+        "GlobalShadows": true
+      }
+    },
+    "MaterialService": {
+      "$properties": {
+        "Use2022Materials": true
+      }
     }
   }
 }

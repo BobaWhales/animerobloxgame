@@ -203,6 +203,88 @@ local CUES = {
 		{ S = "Rise", V = 0.5, P = 0.9 },
 		{ S = "Blip", Arp = { NOTE.G, NOTE.C2 }, Gap = 0.1, V = 0.4 },
 	},
+	-- weapons / abilities
+	HeavySwing = {
+		{ S = "Lunge", V = 0.6, P = { 0.7, 0.8 } },
+		{ S = "Whoosh", V = 0.3, P = { 0.6, 0.7 } },
+	},
+	ScytheSwing = {
+		{ S = "Slash", V = 0.5, P = { 0.75, 0.85 } },
+		{ S = "Whoosh", V = 0.25, P = { 0.9, 1 } },
+	},
+	Punch = {
+		{ S = "Whoosh", V = 0.25, P = { 2.2, 2.5 } },
+		{ S = "Thud", V = 0.35, P = { 1.6, 1.9 } },
+	},
+	GunShot = {
+		{ S = "Boom", V = 0.25, P = { 3.2, 3.6 } },
+		{ S = "Blip", V = 0.2, P = { 3, 3.3 } },
+	},
+	SpiritShot = {
+		{ S = "Blip", V = 0.35, P = { 2.4, 2.7 }, Fx = { Echo = true } },
+		{ S = "Whoosh", V = 0.2, P = 2.4 },
+	},
+	CeroShot = {
+		{ S = "Boom", V = 0.2, P = { 2.6, 3 } },
+		{ S = "Blip", V = 0.15, P = { 1.9, 2.1 }, Fx = { Distort = 0.4 } },
+	},
+	Getsuga = {
+		{ S = "Whoosh", V = 0.8, P = 0.45, Fx = { Reverb = true } },
+		{ S = "Lunge", V = 0.7, P = 0.6 },
+		{ S = "Boom", V = 0.8, P = 0.6, D = 0.05, Fx = { Bass = 8 } },
+		{ S = "Blip", Chord = { NOTE.C, NOTE.G, NOTE.C2 }, V = 0.3, D = 0.05, Fx = { Distort = 0.5, Reverb = true } },
+	},
+	ChargeUp = {
+		{ S = "Rise", V = 0.6, P = 1.4 },
+		{ S = "Blip", Arp = { NOTE.C, NOTE.E, NOTE.G, NOTE.C2, NOTE.E2 }, Gap = 0.2, V = 0.25 },
+	},
+	RasenganHit = {
+		{ S = "Boom", V = 1, P = 0.5, Fx = { Reverb = true, Bass = 10 } },
+		{ S = "Splash", V = 0.7, P = 1.6 },
+		{ S = "Whoosh", V = 0.6, P = 0.5 },
+	},
+	BigBlast = {
+		{ S = "Boom", V = 0.9, P = 0.7, Fx = { Reverb = true, Bass = 8 } },
+		{ S = "Whoosh", V = 0.5, P = 0.8 },
+	},
+	Vortex = {
+		{ S = "Whoosh", V = 0.7, P = 0.35, Fx = { Reverb = true } },
+		{ S = "Bubble", V = 0.5, P = 0.25 },
+	},
+	Dash = {
+		{ S = "Whoosh", V = 0.5, P = { 1.3, 1.5 } },
+	},
+	Ultimate = {
+		{ S = "Rise", V = 0.8, P = 0.7, Fx = { Reverb = true } },
+		{ S = "Boom", V = 0.9, P = 0.45, D = 0.15, Fx = { Reverb = true, Bass = 10 } },
+		{ S = "Blip", Chord = { NOTE.C, NOTE.E, NOTE.G }, V = 0.35, D = 0.15, Fx = { Distort = 0.4, Reverb = true } },
+	},
+	NoStamina = { { S = "Blip", Arp = { 0.8, 0.7 }, Gap = 0.06, V = 0.3 } },
+	EnemyWindup = {
+		{ S = "Rise", V = 0.6, P = 0.6 },
+		{ S = "Blip", Arp = { 0.9, 1, 1.12 }, Gap = 0.15, V = 0.3 },
+	},
+	-- loot / retention
+	ChestTick = { { S = "Blip", V = 0.35, P = { 1.3, 1.5 } } },
+	ChestOpen = {
+		{ S = "Thud", V = 0.7, P = 0.9 },
+		{ S = "Splash", V = 0.4, P = 1.4 },
+	},
+	PlaytimeReward = {
+		{ S = "Blip", Arp = { NOTE.C, NOTE.E, NOTE.G, NOTE.C2, NOTE.E2 }, Gap = 0.07, V = 0.45, Fx = { Echo = true } },
+		{ S = "Rise", V = 0.4, P = 1.3 },
+	},
+	PowerUp = {
+		{ S = "Boom", V = 0.9, P = 0.5, Fx = { Reverb = true, Bass = 10 } },
+		{ S = "Blip", Chord = { NOTE.C, NOTE.G, NOTE.C2 }, V = 0.4, D = 0.1, Fx = { Distort = 0.5 } },
+		{ S = "Blip", Arp = { NOTE.C2, NOTE.E2, NOTE.G2, NOTE.C3 }, Gap = 0.06, V = 0.4, D = 0.3 },
+	},
+	Potion = {
+		{ S = "Splash", V = 0.5, P = 1.5 },
+		{ S = "Blip", Arp = { NOTE.E, NOTE.G, NOTE.C2 }, Gap = 0.08, V = 0.35 },
+	},
+	PromptShow = { { S = "Blip", V = 0.15, P = 2.4 } },
+	PromptTrigger = { { S = "Blip", Arp = { NOTE.G, NOTE.C2 }, Gap = 0.05, V = 0.35 } },
 }
 
 ---------------------------------------------------------------------

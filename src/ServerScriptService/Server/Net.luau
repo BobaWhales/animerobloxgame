@@ -20,7 +20,8 @@ local function remote(name: string): RemoteEvent
 	return r
 end
 
-Net.Swing = remote("Swing") -- client -> server: sword swing
+Net.Ability = remote("Ability") -- client -> server: (action, payload) combat input
+Net.Interact = remote("Interact") -- client -> server: custom ProximityPrompt triggered
 Net.Request = remote("Request") -- client -> server: (action, arg)
 Net.Sync = remote("Sync") -- server -> client: data snapshot
 Net.FXEvent = remote("FX") -- server -> client: (kind, payload)
